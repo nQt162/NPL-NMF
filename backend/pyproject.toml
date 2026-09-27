@@ -1,0 +1,9 @@
+[project]
+name = "topicsum-backend"
+version = "0.0.0"
+requires-python = ">=3.10"
+description = "Bộ khung backend TopicSum"
+
+# TODO: Khai báo FastAPI, NumPy, scikit-learn, underthesea, rouge-score,
+#       uvicorn và các công cụ kiểm thử khi bắt đầu triển khai.
+# TODO: Chốt build backend và cập nhật lệnh cài đặt/chạy trong README.
