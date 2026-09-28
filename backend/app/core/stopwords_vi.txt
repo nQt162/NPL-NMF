@@ -1,0 +1,15 @@
+# Danh sách nhỏ, bảo thủ; mỗi dòng là một token sau word_tokenize.
+và
+là
+của
+những
+các
+được
+đã
+sẽ
+cho
+với
+trong
+ở
+một
+thì

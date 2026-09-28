@@ -1,9 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "topicsum-backend"
-version = "0.0.0"
+version = "0.1.0"
 requires-python = ">=3.10"
-description = "Bộ khung backend TopicSum"
+description = "Vietnamese extractive summarization with shared NMF"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "numpy>=1.26",
+  "scikit-learn>=1.4",
+  "underthesea>=6",
+  "rouge-score>=0.1.2",
+]
 
-# TODO: Khai báo FastAPI, NumPy, scikit-learn, underthesea, rouge-score,
-#       uvicorn và các công cụ kiểm thử khi bắt đầu triển khai.
-# TODO: Chốt build backend và cập nhật lệnh cài đặt/chạy trong README.
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.core" = ["stopwords_vi.txt"]

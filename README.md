@@ -4,7 +4,7 @@ Bộ khung dự án cho ứng dụng tóm tắt **trích xuất** văn bản ti�
 
 ## Trạng thái hiện tại
 
-Đây mới là **cấu trúc và TODO comment** để phân công công việc. Chưa cài thư viện, chưa triển khai API, giao diện, thuật toán, kiểm thử hay thí nghiệm. `results/metrics.csv` và `results/predictions.jsonl` hiện rỗng, không phải kết quả đánh giá.
+Backend đã có xử lý tiếng Việt, NMF tự cài đặt, API, script chuẩn bị dữ liệu/thí nghiệm và kiểm thử. Frontend vẫn là khung TODO. `results/metrics.csv` và `results/predictions.jsonl` hiện rỗng vì chưa có tập đánh giá hợp lệ.
 
 ## Cấu trúc và việc cần làm
 
@@ -18,7 +18,39 @@ Bộ khung dự án cho ứng dụng tóm tắt **trích xuất** văn bản ti�
 | `backend/tests/` | Kiểm tra NMF, thứ tự câu, giới hạn số câu và fallback. |
 | `results/` | Nơi xuất kết quả thí nghiệm sau khi có dữ liệu hợp lệ. |
 
-Đọc TODO trong từng file để biết yêu cầu đầu vào/đầu ra và các trường hợp biên. `pyproject.toml` và `package.json` chỉ chứa metadata tối thiểu; cần bổ sung dependencies và lệnh chạy khi bắt đầu triển khai. Khi đó cập nhật README này bằng **lệnh cài đặt, chạy, kiểm thử thực tế**. Không dùng các lệnh dự kiến trong đặc tả như thể chúng đã hoạt động.
+## Cài đặt và chạy backend (PowerShell)
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+API tại `http://127.0.0.1:8000`, tài liệu tương tác tại `/docs`. Mở một terminal khác trong `backend` để chạy kiểm thử:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
+```
+
+Các endpoint: `GET /health`, `POST /api/simulate`, `POST /api/summarize`, `POST /api/evaluate`. `/api/evaluate` chỉ chấm một mẫu; batch chạy bằng CLI. Ví dụ request tóm tắt:
+
+```json
+{"text":"Thành phố mở tuyến xe buýt điện. Tuyến xe nối ga và bệnh viện. Giá vé bằng tuyến thường.","k":2,"summary_sentences":2}
+```
+
+## Chuẩn bị dữ liệu và chạy thí nghiệm
+
+Điền `data/raw/articles.jsonl` bằng các bài có quyền sử dụng; mỗi dòng cần `id`, `article`, `reference_summary`, `source`, nên có thêm `license`. Từ thư mục `backend` đã cài package:
+
+```powershell
+.\.venv\Scripts\python.exe ..\scripts\prepare_data.py --input ..\data\raw\articles.jsonl --output ..\data\splits
+.\.venv\Scripts\python.exe ..\scripts\run_experiment.py --input ..\data\splits\val.jsonl --output ..\results
+```
+
+Chọn `k`, ngân sách và các hệ số trên validation. Sau khi chốt cấu hình, chạy test đúng một lần bằng `--input ..\data\splits\test.jsonl`; CLI nhận `--k`, `--summary-sentences`, `--alpha`, `--beta`, `--gamma`, `--seed`. Kết quả gồm `metrics.csv`, `predictions.jsonl`, `report.json`. Script chia tập ghi thêm `manifest.json`; manifest nhắc kiểm tra thủ công quyền sử dụng, câu quảng cáo và tham chiếu lấy từ sapo/lead.
+
+ROUGE-1/2/L F1 tính trên token do `underthesea.word_tokenize(format="text")` tạo ra, lowercase nhưng **giữ dấu**, không bỏ stopword và không dùng English stemming. Cùng một cách tách từ được áp dụng cho Lead-N và NMF. Các điểm F1 nằm trong khoảng 0–1. `sentence_analysis` lưu điểm ở lúc chọn đối với câu được chọn; các câu khác giữ điểm ở vòng đầu.
 
 ## Quy tắc dữ liệu và đánh giá
 
