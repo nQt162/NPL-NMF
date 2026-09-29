@@ -4,7 +4,7 @@ Bộ khung dự án cho ứng dụng tóm tắt **trích xuất** văn bản ti�
 
 ## Trạng thái hiện tại
 
-Backend đã có xử lý tiếng Việt, NMF tự cài đặt, API, script chuẩn bị dữ liệu/thí nghiệm và kiểm thử. Frontend vẫn là khung TODO. `results/metrics.csv` và `results/predictions.jsonl` hiện rỗng vì chưa có tập đánh giá hợp lệ.
+Backend đã có xử lý tiếng Việt, NMF tự cài đặt, API, script chuẩn bị dữ liệu/thí nghiệm và kiểm thử. Frontend React/Vite có ba màn hình dùng API thật. `results/metrics.csv` và `results/predictions.jsonl` hiện rỗng vì chưa có tập đánh giá hợp lệ.
 
 ## Cấu trúc và việc cần làm
 
@@ -38,6 +38,22 @@ Các endpoint: `GET /health`, `POST /api/simulate`, `POST /api/summarize`, `POST
 ```json
 {"text":"Thành phố mở tuyến xe buýt điện. Tuyến xe nối ga và bệnh viện. Giá vé bằng tuyến thường.","k":2,"summary_sentences":2}
 ```
+
+## Cài đặt và chạy frontend (PowerShell)
+
+Cần Node.js 20.19+ hoặc 22.12+. Chạy backend ở cổng 8000 trước, sau đó mở terminal khác:
+
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+Mở `http://localhost:5173`. Vite chuyển `/api` và `/health` đến `http://127.0.0.1:8000`. Nếu frontend được phục vụ riêng, đặt `VITE_API_URL` thành địa chỉ backend trước khi build và cấu hình CORS backend cho origin tương ứng. Kiểm tra frontend bằng `npm.cmd test` và `npm.cmd run build`.
+
+- **Mô phỏng NMF:** nạp văn bản tự viết từ `data/demo/toy.json`, gọi `/api/simulate` và hiển thị V, W, H, WH, loss ở từng vòng.
+- **Tóm tắt:** gọi `/api/summarize`, hiển thị câu gốc, chủ đề, điểm thành phần và lý do fallback.
+- **Đánh giá:** đọc `results/metrics.csv` thật để so sánh Lead-N/NMF; dùng `/api/evaluate` khi chấm một mẫu. Trong dev, nút “Làm mới dữ liệu” đọc CSV mới nhất. Build tĩnh chứa bản CSV tại thời điểm build, nên cần build lại sau khi thí nghiệm thay đổi.
 
 ## Chuẩn bị dữ liệu và chạy thí nghiệm
 
