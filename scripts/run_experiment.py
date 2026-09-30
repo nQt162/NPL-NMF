@@ -24,12 +24,15 @@ def run_experiment(
     alpha: float = 1.0,
     beta: float = 1.0,
     gamma: float = 0.5,
+    position_weight: float = 0.15,
+    length_weight: float = 0.1,
     seed: int = 42,
 ) -> dict:
     if not input_path.is_file():
         raise ValueError(f"Không tìm thấy tập dữ liệu: {input_path}")
     config = dict(k=k, summary_sentences=summary_sentences, alpha=alpha,
-                  beta=beta, gamma=gamma, seed=seed, input=str(input_path))
+                  beta=beta, gamma=gamma, position_weight=position_weight,
+                  length_weight=length_weight, seed=seed, input=str(input_path))
     rows: list[dict] = []
     predictions: list[dict] = []
     errors: list[dict] = []
@@ -52,7 +55,9 @@ def run_experiment(
             start = perf_counter()
             nmf_result = summarize(item["article"], k=k,
                                    summary_sentences=summary_sentences,
-                                   alpha=alpha, beta=beta, gamma=gamma, seed=seed)
+                                   alpha=alpha, beta=beta, gamma=gamma,
+                                   position_weight=position_weight,
+                                   length_weight=length_weight, seed=seed)
             nmf_runtime = perf_counter() - start
             methods = [
                 ("Lead-N", baseline_summary, baseline_indices, baseline_runtime, None),
@@ -111,11 +116,15 @@ def main() -> None:
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--beta", type=float, default=1.0)
     parser.add_argument("--gamma", type=float, default=0.5)
+    parser.add_argument("--position-weight", type=float, default=0.15)
+    parser.add_argument("--length-weight", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     print(json.dumps(run_experiment(
         args.input, args.output, k=args.k, summary_sentences=args.summary_sentences,
-        alpha=args.alpha, beta=args.beta, gamma=args.gamma, seed=args.seed,
+        alpha=args.alpha, beta=args.beta, gamma=args.gamma,
+        position_weight=args.position_weight, length_weight=args.length_weight,
+        seed=args.seed,
     ), ensure_ascii=True, indent=2))
 
 

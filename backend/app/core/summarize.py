@@ -5,10 +5,34 @@ from __future__ import annotations
 import numpy as np
 
 from .baselines import lead_n
+from .corpus_model import load_corpus_nmf_model
 from .nmf import EPS, fit_nmf
 from .preprocess import preprocess_sentences
 from .sentences import split_sentences
 from .vectorize import vectorize_sentences
+
+
+SUMMARY_NGRAM_RANGE = (1, 2)
+SUMMARY_MAX_FEATURES = 800
+
+
+def _position_prior(index: int, total: int) -> float:
+    """Favor lead sentences mildly without turning NMF into Lead-N."""
+    if total <= 1:
+        return 1.0
+    return 1.0 / (1.0 + index)
+
+
+def _length_quality(processed_sentence: str, min_good: int = 8, max_good: int = 35) -> float:
+    """Prefer contentful sentences and downweight very short or very long ones."""
+    token_count = len(processed_sentence.split())
+    if token_count <= 0:
+        return 0.0
+    if token_count < min_good:
+        return token_count / min_good
+    if token_count <= max_good:
+        return 1.0
+    return max(0.25, max_good / token_count)
 
 
 def _fallback(sentences: list[str], budget: int, reason: str) -> dict:
@@ -25,6 +49,8 @@ def _fallback(sentences: list[str], budget: int, reason: str) -> dict:
                 "relevance": 0.0,
                 "coverage_gain": 0.0,
                 "redundancy": 0.0,
+                "position_prior": 0.0,
+                "length_quality": 0.0,
                 "score": 0.0,
                 "dominant_topic": None,
             }
@@ -41,6 +67,8 @@ def summarize(
     alpha: float = 1.0,
     beta: float = 1.0,
     gamma: float = 0.5,
+    position_weight: float = 0.15,
+    length_weight: float = 0.1,
     seed: int = 42,
 ) -> dict:
     """Summarize one article; scores are from selection time for chosen rows.
@@ -52,8 +80,9 @@ def summarize(
         raise ValueError("k phải là số nguyên dương")
     if not isinstance(summary_sentences, int) or not 1 <= summary_sentences <= 5:
         raise ValueError("summary_sentences phải nằm trong 1..5")
-    if not all(np.isfinite(value) and value >= 0 for value in (alpha, beta, gamma)):
-        raise ValueError("alpha, beta, gamma phải hữu hạn và không âm")
+    if not all(np.isfinite(value) and value >= 0
+               for value in (alpha, beta, gamma, position_weight, length_weight)):
+        raise ValueError("Scoring weights must be finite and nonnegative")
 
     sentences = split_sentences(text)
     if not sentences:
@@ -63,12 +92,21 @@ def summarize(
         return _fallback(sentences, budget, "Văn bản có ít hơn 2 câu hữu ích")
 
     processed = preprocess_sentences(sentences)
-    V, terms = vectorize_sentences(processed)
+    corpus_model = load_corpus_nmf_model()
+    if corpus_model is not None:
+        V, terms, W, H = corpus_model.project(processed, k)
+    else:
+        V, terms = vectorize_sentences(
+            processed,
+            ngram_range=SUMMARY_NGRAM_RANGE,
+            max_features=SUMMARY_MAX_FEATURES,
+        )
+        if len(terms) < 2 or np.count_nonzero(V.any(axis=1)) < 2:
+            return _fallback(sentences, budget, "TF-IDF có ít hơn 2 câu/từ hữu ích")
+        nmf = fit_nmf(V, k, seed=seed)
+        W, H = nmf.W, nmf.H
     if len(terms) < 2 or np.count_nonzero(V.any(axis=1)) < 2:
         return _fallback(sentences, budget, "TF-IDF có ít hơn 2 câu/từ hữu ích")
-
-    nmf = fit_nmf(V, k, seed=seed)
-    W, H = nmf.W, nmf.H
     salience = W.sum(axis=0)
     salience = salience / (salience.sum() + EPS)
     W_normalized = W / (W.sum(axis=1, keepdims=True) + EPS)
@@ -81,6 +119,8 @@ def summarize(
     coverage = np.zeros(W.shape[1], dtype=float)
     analysis: list[dict | None] = [None] * len(sentences)
     norms = np.linalg.norm(V, axis=1)
+    position_priors = [_position_prior(i, len(sentences)) for i in range(len(sentences))]
+    length_qualities = [_length_quality(sentence) for sentence in processed]
     for _ in range(budget):
         candidates: list[tuple[float, int]] = []
         current_scores: dict[int, dict] = {}
@@ -89,6 +129,8 @@ def summarize(
                 continue
             relevance = float(np.dot(W_normalized[i], salience))
             gain = float(np.dot(np.maximum(W_normalized[i] - coverage, 0), salience))
+            position = position_priors[i]
+            length = length_qualities[i]
             redundancy = 0.0
             if selected and norms[i] > 0:
                 redundancy = max(
@@ -96,7 +138,13 @@ def summarize(
                      for j in selected if norms[j] > 0),
                     default=0.0,
                 )
-            score = alpha * relevance + beta * gain - gamma * redundancy
+            score = (
+                alpha * relevance
+                + beta * gain
+                + position_weight * position
+                + length_weight * length
+                - gamma * redundancy
+            )
             current = {
                 "index": i,
                 "text": sentence,
@@ -104,6 +152,8 @@ def summarize(
                 "relevance": relevance,
                 "coverage_gain": gain,
                 "redundancy": redundancy,
+                "position_prior": float(position),
+                "length_quality": float(length),
                 "score": float(score),
                 "dominant_topic": int(np.argmax(W_normalized[i])),
             }

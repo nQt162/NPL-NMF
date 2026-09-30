@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class TextRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=20_000)
+    text: str = Field(min_length=1)
 
     @field_validator("text")
     @classmethod
@@ -43,6 +43,8 @@ class SummarizeRequest(TextRequest):
     alpha: float = Field(default=1, ge=0, allow_inf_nan=False)
     beta: float = Field(default=1, ge=0, allow_inf_nan=False)
     gamma: float = Field(default=0.5, ge=0, allow_inf_nan=False)
+    position_weight: float = Field(default=0.15, ge=0, allow_inf_nan=False)
+    length_weight: float = Field(default=0.1, ge=0, allow_inf_nan=False)
 
 
 class TopicResponse(BaseModel):
@@ -56,6 +58,8 @@ class SentenceAnalysisResponse(BaseModel):
     relevance: float
     coverage_gain: float
     redundancy: float
+    position_prior: float
+    length_quality: float
     score: float
     dominant_topic: int | None
 
@@ -69,7 +73,7 @@ class SummarizeResponse(BaseModel):
 
 
 class EvaluateRequest(TextRequest):
-    reference_summary: str = Field(min_length=1, max_length=20_000)
+    reference_summary: str = Field(min_length=1)
     summary_sentences: int = Field(default=3, ge=1, le=5)
 
     @field_validator("reference_summary")

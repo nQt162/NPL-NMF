@@ -82,9 +82,9 @@ export default function Evaluation() {
         <form className="panel form-panel" onSubmit={handleDemo}>
           <div className="panel-top"><span className="panel-label">THỬ NGAY VỚI MỘT MẪU</span><span className="panel-meta">API / EVALUATE</span></div>
           <label className="field-label" htmlFor="evaluate-text">Văn bản nguồn</label>
-          <textarea id="evaluate-text" rows={8} maxLength={20000} value={text} onChange={(event) => updateDemoField(setText, event.target.value)} placeholder="Nhập văn bản nguồn…" />
+          <textarea id="evaluate-text" rows={8} value={text} onChange={(event) => updateDemoField(setText, event.target.value)} placeholder="Nhập văn bản nguồn…" />
           <label className="field-label field-label-spaced" htmlFor="evaluate-reference">Bản tóm tắt tham chiếu</label>
-          <textarea id="evaluate-reference" rows={4} maxLength={20000} value={reference} onChange={(event) => updateDemoField(setReference, event.target.value)} placeholder="Nhập bản tóm tắt tham chiếu của chính bạn…" />
+          <textarea id="evaluate-reference" rows={4} value={reference} onChange={(event) => updateDemoField(setReference, event.target.value)} placeholder="Nhập bản tóm tắt tham chiếu của chính bạn…" />
           <label className="field-group compact-field">Số câu tóm tắt<input type="number" min="1" max="5" value={sentenceCount} onChange={(event) => updateDemoField(setSentenceCount, event.target.value)} required /></label>
           {demoError && <div className="alert alert-error" role="alert">{demoError}</div>}
           <button className="primary-button" type="submit" disabled={demoLoading}>{demoLoading ? 'Đang đánh giá…' : 'Chấm điểm mẫu này'}<span aria-hidden="true">↗</span></button>

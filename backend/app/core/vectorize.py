@@ -6,7 +6,12 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 
-def vectorize_sentences(processed_sentences: list[str]) -> tuple[np.ndarray, list[str]]:
+def vectorize_sentences(
+    processed_sentences: list[str],
+    *,
+    ngram_range: tuple[int, int] = (1, 1),
+    max_features: int | None = None,
+) -> tuple[np.ndarray, list[str]]:
     """Return V and its column terms; empty vocabularies become n-by-0 V."""
     if not processed_sentences:
         return np.zeros((0, 0), dtype=float), []
@@ -17,6 +22,9 @@ def vectorize_sentences(processed_sentences: list[str]) -> tuple[np.ndarray, lis
         lowercase=False,
         norm="l2",
         min_df=1,
+        ngram_range=ngram_range,
+        max_features=max_features,
+        sublinear_tf=True,
     )
     try:
         matrix = vectorizer.fit_transform(processed_sentences).toarray()

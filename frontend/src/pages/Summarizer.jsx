@@ -13,6 +13,8 @@ export default function Summarizer() {
   const [alpha, setAlpha] = useState(1);
   const [beta, setBeta] = useState(1);
   const [gamma, setGamma] = useState(0.5);
+  const [positionWeight, setPositionWeight] = useState(0.15);
+  const [lengthWeight, setLengthWeight] = useState(0.1);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -40,6 +42,8 @@ export default function Summarizer() {
         alpha: Number(alpha),
         beta: Number(beta),
         gamma: Number(gamma),
+        position_weight: Number(positionWeight),
+        length_weight: Number(lengthWeight),
       });
       setResult(data);
     } catch (cause) {
@@ -63,15 +67,15 @@ export default function Summarizer() {
       <div className="section-heading"><div><div className="section-kicker">02 / TÓM TẮT TRÍCH XUẤT</div><h2 id="summarizer-heading">Giữ lại điều quan trọng</h2><p>Chọn các câu bao phủ nhiều chủ đề và hạn chế lặp nội dung.</p></div><span className="section-index">02</span></div>
       <div className="workspace-grid">
         <form className="panel form-panel" onSubmit={handleSubmit}>
-          <div className="panel-top"><span className="panel-label">VĂN BẢN NGUỒN</span><span className="panel-meta">TỐI ĐA 20.000 KÝ TỰ</span></div>
+          <div className="panel-top"><span className="panel-label">VĂN BẢN NGUỒN</span><span className="panel-meta">KHÔNG GIỚI HẠN TỪ</span></div>
           <label className="field-label" htmlFor="summarize-text">Nội dung cần tóm tắt</label>
-          <textarea id="summarize-text" value={text} onChange={(event) => updateField(setText, event.target.value)} maxLength={20000} rows={12} placeholder="Dán văn bản tiếng Việt vào đây…" />
-          <div className="field-hint"><span>{text.length.toLocaleString('vi-VN')} / 20.000 ký tự</span><button type="button" className="text-button" onClick={() => { setText(toy.text); setResult(null); setError(''); }}>Nạp ví dụ</button></div>
+          <textarea id="summarize-text" value={text} onChange={(event) => updateField(setText, event.target.value)} rows={12} placeholder="Dán văn bản tiếng Việt vào đây…" />
+          <div className="field-hint"><span>{text.length.toLocaleString('vi-VN')} ký tự</span><button type="button" className="text-button" onClick={() => { setText(toy.text); setResult(null); setError(''); }}>Nạp ví dụ</button></div>
           <div className="form-row two-cols">
             <label className="field-group">Số chủ đề k<input type="number" min="1" max="10" value={k} onChange={(event) => updateField(setK, event.target.value)} required /></label>
             <label className="field-group">Số câu tóm tắt<input type="number" min="1" max="5" value={sentenceCount} onChange={(event) => updateField(setSentenceCount, event.target.value)} required /></label>
           </div>
-          <details className="advanced-settings"><summary>Tinh chỉnh hệ số chấm điểm <span>↘</span></summary><div className="form-row three-cols"><label className="field-group">Liên quan α<input type="number" min="0" step="0.1" value={alpha} onChange={(event) => updateField(setAlpha, event.target.value)} required /></label><label className="field-group">Bao phủ β<input type="number" min="0" step="0.1" value={beta} onChange={(event) => updateField(setBeta, event.target.value)} required /></label><label className="field-group">Giảm lặp γ<input type="number" min="0" step="0.1" value={gamma} onChange={(event) => updateField(setGamma, event.target.value)} required /></label></div></details>
+          <details className="advanced-settings"><summary>Tinh chỉnh hệ số chấm điểm <span>↘</span></summary><div className="form-row three-cols"><label className="field-group">Liên quan α<input type="number" min="0" step="0.1" value={alpha} onChange={(event) => updateField(setAlpha, event.target.value)} required /></label><label className="field-group">Bao phủ β<input type="number" min="0" step="0.1" value={beta} onChange={(event) => updateField(setBeta, event.target.value)} required /></label><label className="field-group">Giảm lặp γ<input type="number" min="0" step="0.1" value={gamma} onChange={(event) => updateField(setGamma, event.target.value)} required /></label><label className="field-group">Vị trí<input type="number" min="0" step="0.05" value={positionWeight} onChange={(event) => updateField(setPositionWeight, event.target.value)} required /></label><label className="field-group">Độ dài<input type="number" min="0" step="0.05" value={lengthWeight} onChange={(event) => updateField(setLengthWeight, event.target.value)} required /></label></div></details>
           {error && <div className="alert alert-error" role="alert">{error}</div>}
           <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Đang phân tích…' : 'Tạo bản tóm tắt'}<span aria-hidden="true">↗</span></button>
         </form>
@@ -96,7 +100,7 @@ export default function Summarizer() {
           {result.fallback_reason && <div className="alert alert-warning" role="status">Dùng Lead-N: {result.fallback_reason}</div>}
           <div className="panel summary-card"><div className="panel-top"><span className="panel-label">BẢN TÓM TẮT</span><button type="button" className="text-button" onClick={copySummary}>{copied ? 'Đã sao chép ✓' : 'Sao chép ↗'}</button></div><blockquote>{result.summary}</blockquote><div className="summary-caption">Các câu được giữ nguyên từ văn bản nguồn, theo thứ tự xuất hiện.</div></div>
           {result.topics.length > 0 && <div className="topic-section"><div className="subheading"><span className="panel-label">TỪ KHÓA THEO CHỦ ĐỀ</span><small>Top 5 từ từ ma trận H</small></div><div className="topic-grid">{result.topics.map((topic, index) => <div className="panel topic-card" key={index}><div className="topic-label"><span>CHỦ ĐỀ</span><strong>{String(index + 1).padStart(2, '0')}</strong></div><div className="term-list">{topic.top_terms.map((term) => <span key={term}>{term.replaceAll('_', ' ')}</span>)}</div></div>)}</div></div>}
-          <div className="sentence-section"><div className="subheading"><span className="panel-label">PHÂN TÍCH TỪNG CÂU</span><small>Câu được chọn: điểm tại lượt chọn · câu khác: điểm ở lượt đầu</small></div><div className="sentence-list">{result.sentence_analysis.map((item) => <article className={`panel sentence-card ${item.selected ? 'selected' : ''}`} key={item.index}><div className="sentence-card-head"><span className="sentence-no">CÂU {String(item.index + 1).padStart(2, '0')}</span><span className={`sentence-status ${item.selected ? 'is-selected' : ''}`}>{item.selected ? 'ĐƯỢC CHỌN' : 'BỎ QUA'}</span></div><p>{item.text}</p><div className="score-list"><span>Chủ đề <strong>{item.dominant_topic === null ? '—' : item.dominant_topic + 1}</strong></span><span>Liên quan <strong>{number(item.relevance)}</strong></span><span>Bao phủ <strong>{number(item.coverage_gain)}</strong></span><span>Trùng lặp <strong>{number(item.redundancy)}</strong></span><span>Điểm <strong>{number(item.score)}</strong></span></div></article>)}</div></div>
+          <div className="sentence-section"><div className="subheading"><span className="panel-label">PHÂN TÍCH TỪNG CÂU</span><small>Câu được chọn: điểm tại lượt chọn · câu khác: điểm ở lượt đầu</small></div><div className="sentence-list">{result.sentence_analysis.map((item) => <article className={`panel sentence-card ${item.selected ? 'selected' : ''}`} key={item.index}><div className="sentence-card-head"><span className="sentence-no">CÂU {String(item.index + 1).padStart(2, '0')}</span><span className={`sentence-status ${item.selected ? 'is-selected' : ''}`}>{item.selected ? 'ĐƯỢC CHỌN' : 'BỎ QUA'}</span></div><p>{item.text}</p><div className="score-list"><span>Chủ đề <strong>{item.dominant_topic === null ? '—' : item.dominant_topic + 1}</strong></span><span>Liên quan <strong>{number(item.relevance)}</strong></span><span>Bao phủ <strong>{number(item.coverage_gain)}</strong></span><span>Vị trí <strong>{number(item.position_prior ?? 0)}</strong></span><span>Độ dài <strong>{number(item.length_quality ?? 0)}</strong></span><span>Trùng lặp <strong>{number(item.redundancy)}</strong></span><span>Điểm <strong>{number(item.score)}</strong></span></div></article>)}</div></div>
         </div>
       )}
     </section>
