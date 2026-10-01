@@ -81,7 +81,7 @@ Trước khi tính, chuẩn hóa mỗi hàng W về tổng 1; salience tính t�
 
 ## 4. API
 - `GET /health` → `{ "status": "ok" }`.
-- `POST /api/simulate` body `{ "text": "...", "k": 2, "iterations": 10, "seed": 42 }`; chỉ nhận tối đa 10 câu / 50 từ vựng; response gồm `sentences`, `terms`, `V`, `snapshots:[{iteration,W,H,WH,loss}]`. Ma trận lớn trả 422 với thông báo rõ. Dùng `fit_nmf(trace=True)`.
+- `POST /api/simulate` body `{ "text": "...", "k": 2, "iterations": 10, "seed": 42 }`; không giới hạn số câu và từ vựng; response gồm `sentences`, `terms`, `V`, `snapshots:[{iteration,W,H,WH,loss}]`. Dùng `fit_nmf(trace=True)`.
 - `POST /api/summarize` body `{ "text": "...", "k": 2, "summary_sentences": 3, "alpha": 1, "beta": 1, "gamma": 0.5 }`; response `{ "summary": "...", "selected_indices": [0,2,5], "topics": [{"top_terms": [...] }], "sentence_analysis": [{"index":0,"text":"...","selected":true,"relevance":0.0,"coverage_gain":0.0,"redundancy":0.0,"score":0.0,"dominant_topic":0}], "fallback_reason": null }`. `sentence_analysis` là điểm tại lúc xét/chọn hoặc điểm đầu vòng được mô tả rõ trong code; không giả định score cố định khi đã có chọn câu.
 - `POST /api/evaluate` chỉ dùng cho một mẫu demo `{ "text":"...", "reference_summary":"...", "summary_sentences":3 }`; trả ROUGE-1/2/L F1 và summary. Batch đánh giá chạy từ CLI, không qua API.
 - Validation Pydantic: giới hạn kích thước văn bản ~20.000 ký tự, k 1..10, số câu 1..5, iterations 1..20 cho simulate; 422 cho input thiếu/hỏng. Frontend hiển thị lỗi.

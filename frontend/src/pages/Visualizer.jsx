@@ -44,7 +44,9 @@ export default function Visualizer() {
     if (!text.trim()) { setError('Hãy nhập văn bản để mô phỏng.'); return; }
     setLoading(true);
     try {
-      const data = await simulate({ text, k: Number(k), iterations: Number(iterations), seed: Number(seed) });
+      const payload = { text, iterations: Number(iterations), seed: Number(seed) };
+      if (k) payload.k = Number(k);
+      const data = await simulate(payload);
       setResult(data);
       setStep(0);
     } catch (cause) {
@@ -68,10 +70,10 @@ export default function Visualizer() {
         <form className="panel form-panel" onSubmit={handleSubmit}>
           <div className="panel-top"><span className="panel-label">ĐẦU VÀO</span><span className="panel-meta">MẪU TỰ VIẾT</span></div>
           <label className="field-label" htmlFor="simulate-text">Văn bản tiếng Việt</label>
-          <textarea id="simulate-text" value={text} onChange={(event) => updateField(setText, event.target.value)} maxLength={20000} rows={11} placeholder="Nhập từ 2 đến 10 câu..." />
-          <div className="field-hint">Tối đa 10 câu và 50 từ vựng sau tiền xử lý. <button type="button" className="text-button" onClick={() => { setText(toy.text); setResult(null); setError(''); }}>Nạp lại ví dụ</button></div>
+          <textarea id="simulate-text" value={text} onChange={(event) => updateField(setText, event.target.value)} maxLength={20000} rows={11} placeholder="Nhập văn bản..." />
+          <div className="field-hint">Không giới hạn số câu và từ vựng. <button type="button" className="text-button" onClick={() => { setText(toy.text); setResult(null); setError(''); }}>Nạp lại ví dụ</button></div>
           <div className="form-row three-cols">
-            <label className="field-group">Số chủ đề k<input type="number" min="1" max="10" value={k} onChange={(event) => updateField(setK, event.target.value)} required /></label>
+            <label className="field-group">Số chủ đề k (Tự động nếu để trống)<input type="number" min="1" max="10" value={k} onChange={(event) => updateField(setK, event.target.value)} /></label>
             <label className="field-group">Số vòng lặp<input type="number" min="1" max="20" value={iterations} onChange={(event) => updateField(setIterations, event.target.value)} required /></label>
             <label className="field-group">Seed<input type="number" value={seed} onChange={(event) => updateField(setSeed, event.target.value)} required /></label>
           </div>

@@ -6,7 +6,7 @@ import numpy as np
 
 from .baselines import lead_n
 from .corpus_model import load_corpus_nmf_model
-from .nmf import EPS, fit_nmf
+from .nmf import EPS, fit_nmf, auto_select_k
 from .preprocess import preprocess_sentences
 from .sentences import split_sentences
 from .vectorize import vectorize_sentences
@@ -62,7 +62,7 @@ def _fallback(sentences: list[str], budget: int, reason: str) -> dict:
 
 def summarize(
     text: str,
-    k: int = 2,
+    k: int | None = None,
     summary_sentences: int = 3,
     alpha: float = 1.0,
     beta: float = 1.0,
@@ -76,10 +76,10 @@ def summarize(
     For rows never chosen, sentence_analysis records their first-round score.
     Selected sentences are restored to source order in the final summary.
     """
-    if not isinstance(k, int) or k < 1:
+    if k is not None and (not isinstance(k, int) or k < 1):
         raise ValueError("k phải là số nguyên dương")
-    if not isinstance(summary_sentences, int) or not 1 <= summary_sentences <= 5:
-        raise ValueError("summary_sentences phải nằm trong 1..5")
+    if not isinstance(summary_sentences, int) or summary_sentences < 1:
+        raise ValueError("summary_sentences phải là số nguyên dương")
     if not all(np.isfinite(value) and value >= 0
                for value in (alpha, beta, gamma, position_weight, length_weight)):
         raise ValueError("Scoring weights must be finite and nonnegative")
@@ -87,14 +87,22 @@ def summarize(
     sentences = split_sentences(text)
     if not sentences:
         raise ValueError("Văn bản phải có ít nhất một câu")
-    budget = min(summary_sentences, len(sentences))
+    max_budget = max(1, (len(sentences) - 1) // 2)
+    budget = min(summary_sentences, max_budget)
     if len(sentences) < 2:
         return _fallback(sentences, budget, "Văn bản có ít hơn 2 câu hữu ích")
 
     processed = preprocess_sentences(sentences)
     corpus_model = load_corpus_nmf_model()
+    
+    # Needs V to select k if not provided
     if corpus_model is not None:
-        V, terms, W, H = corpus_model.project(processed, k)
+        V, terms, W_temp, H_temp = corpus_model.project(processed, k if k is not None else 2)
+        if k is None:
+            k = auto_select_k(V, seed=seed)
+            V, terms, W, H = corpus_model.project(processed, k)
+        else:
+            W, H = W_temp, H_temp
     else:
         V, terms = vectorize_sentences(
             processed,
@@ -103,6 +111,8 @@ def summarize(
         )
         if len(terms) < 2 or np.count_nonzero(V.any(axis=1)) < 2:
             return _fallback(sentences, budget, "TF-IDF có ít hơn 2 câu/từ hữu ích")
+        if k is None:
+            k = auto_select_k(V, seed=seed)
         nmf = fit_nmf(V, k, seed=seed)
         W, H = nmf.W, nmf.H
     if len(terms) < 2 or np.count_nonzero(V.any(axis=1)) < 2:

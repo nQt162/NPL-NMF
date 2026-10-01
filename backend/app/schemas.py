@@ -17,8 +17,8 @@ class TextRequest(BaseModel):
 
 
 class SimulateRequest(TextRequest):
-    k: int = Field(default=2, ge=1, le=10)
-    iterations: int = Field(default=10, ge=1, le=20)
+    k: int | None = Field(default=None, ge=1)
+    iterations: int = Field(default=10, ge=1)
     seed: int = 42
 
 
@@ -38,8 +38,8 @@ class SimulateResponse(BaseModel):
 
 
 class SummarizeRequest(TextRequest):
-    k: int = Field(default=2, ge=1, le=10)
-    summary_sentences: int = Field(default=3, ge=1, le=5)
+    k: int | None = Field(default=None, ge=1)
+    summary_sentences: int = Field(default=3, ge=1)
     alpha: float = Field(default=1, ge=0, allow_inf_nan=False)
     beta: float = Field(default=1, ge=0, allow_inf_nan=False)
     gamma: float = Field(default=0.5, ge=0, allow_inf_nan=False)
@@ -74,7 +74,7 @@ class SummarizeResponse(BaseModel):
 
 class EvaluateRequest(TextRequest):
     reference_summary: str = Field(min_length=1)
-    summary_sentences: int = Field(default=3, ge=1, le=5)
+    summary_sentences: int = Field(default=3, ge=1)
 
     @field_validator("reference_summary")
     @classmethod

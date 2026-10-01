@@ -45,15 +45,15 @@ def health() -> dict[str, str]:
 @app.post("/api/simulate", response_model=SimulateResponse)
 def simulate(request: SimulateRequest) -> dict:
     sentences = split_sentences(request.text)
-    if len(sentences) > 10:
-        raise HTTPException(422, "Mô phỏng chỉ hỗ trợ tối đa 10 câu")
     V, terms = vectorize_sentences(preprocess_sentences(sentences))
-    if len(terms) > 50:
-        raise HTTPException(422, "Mô phỏng chỉ hỗ trợ tối đa 50 từ vựng")
     if len(sentences) < 2 or len(terms) < 2:
         raise HTTPException(422, "Cần ít nhất 2 câu và 2 từ hữu ích để mô phỏng NMF")
     try:
-        result = fit_nmf(V, request.k, request.seed, request.iterations, trace=True)
+        k_to_use = request.k
+        if k_to_use is None:
+            from .core.nmf import auto_select_k
+            k_to_use = auto_select_k(V, seed=request.seed)
+        result = fit_nmf(V, k_to_use, request.seed, request.iterations, trace=True)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {

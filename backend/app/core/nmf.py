@@ -39,6 +39,7 @@ def fit_nmf(
     seed: int = 42,
     max_iter: int = 100,
     trace: bool = False,
+    mask: np.ndarray | None = None,
 ) -> NMFResult:
     """Factor V ≈ W @ H; record snapshots only for a small visual trace.
 
@@ -52,8 +53,6 @@ def fit_nmf(
         raise ValueError("k phải là số nguyên dương")
     if not isinstance(max_iter, int) or max_iter < 1:
         raise ValueError("max_iter phải là số nguyên dương")
-    if trace and (V.shape[0] > 10 or V.shape[1] > 50 or max_iter > 20):
-        raise ValueError("trace chỉ hỗ trợ tối đa 10 câu, 50 từ và 20 vòng")
 
     rank = min(k, *V.shape)
     rng = np.random.default_rng(seed)
@@ -63,13 +62,26 @@ def fit_nmf(
     losses: list[float] = []
 
     for iteration in range(1, max_iter + 1):
-        H *= (W.T @ V) / (W.T @ W @ H + EPS)
-        W *= (V @ H.T) / (W @ H @ H.T + EPS)
-        if trace:
-            current = _snapshot(iteration, V, W, H)
-            loss = current.loss
+        if mask is not None:
+            V_masked = mask * V
+            WH_masked = mask * (W @ H)
+            H *= (W.T @ V_masked) / (W.T @ WH_masked + EPS)
+            # Recompute WH_masked after H is updated
+            WH_masked = mask * (W @ H)
+            W *= (V_masked @ H.T) / (WH_masked @ H.T + EPS)
+            if trace:
+                current = _snapshot(iteration, V, W, H)
+                loss = current.loss
+            else:
+                loss = 0.5 * float(np.sum((mask * (V - W @ H)) ** 2))
         else:
-            loss = 0.5 * float(np.sum((V - W @ H) ** 2))
+            H *= (W.T @ V) / (W.T @ W @ H + EPS)
+            W *= (V @ H.T) / (W @ H @ H.T + EPS)
+            if trace:
+                current = _snapshot(iteration, V, W, H)
+                loss = current.loss
+            else:
+                loss = 0.5 * float(np.sum((V - W @ H) ** 2))
         losses.append(loss)
         if trace:
             snapshots.append(current)
@@ -79,3 +91,48 @@ def fit_nmf(
             if 0 <= relative_improvement < 1e-5:
                 break
     return NMFResult(W, H, losses, snapshots)
+
+
+def auto_select_k(V: np.ndarray, max_k: int = 10, seed: int = 42) -> int:
+    """Determine the optimal k using missing value imputation over multiple trials."""
+    V = np.asarray(V, dtype=float)
+    n_sentences = V.shape[0]
+    limit = min(max_k, n_sentences - 1)
+    if limit < 2:
+        return max(1, limit)
+    
+    k_values = list(range(2, limit + 1))
+    if len(k_values) == 1:
+        return k_values[0]
+
+    n_trials = 5
+    rng = np.random.default_rng(seed)
+    selected_ks = []
+
+    for trial in range(n_trials):
+        # Create a mask where ~30% of entries are selected as missing (0)
+        mask = (rng.random(V.shape) > 0.30).astype(float)
+        missing_mask = (mask == 0.0)
+    
+        val_errors = []
+        for k in k_values:
+            # Impute missing entries with NMF. Use different seed for each trial
+            res = fit_nmf(V, k=k, seed=seed + trial * 100, max_iter=50, mask=mask)
+            reconstruction = res.W @ res.H
+            
+            # Compare imputed entries to their observed values
+            if np.any(missing_mask):
+                mse = float(np.mean((V[missing_mask] - reconstruction[missing_mask]) ** 2))
+            else:
+                mse = res.losses[-1] if res.losses else 0.0
+                
+            val_errors.append(mse)
+    
+        # The k that gives the smallest imputation error is selected
+        best_idx = int(np.argmin(val_errors))
+        selected_ks.append(k_values[best_idx])
+
+    # Select the k that appears most frequently (mode)
+    from collections import Counter
+    most_common_k = Counter(selected_ks).most_common(1)[0][0]
+    return most_common_k

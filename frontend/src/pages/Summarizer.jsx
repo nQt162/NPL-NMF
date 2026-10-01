@@ -35,16 +35,17 @@ export default function Summarizer() {
     if (!text.trim()) { setError('Hãy nhập văn bản cần tóm tắt.'); return; }
     setLoading(true);
     try {
-      const data = await summarize({
+      const payload = {
         text,
-        k: Number(k),
         summary_sentences: Number(sentenceCount),
         alpha: Number(alpha),
         beta: Number(beta),
         gamma: Number(gamma),
         position_weight: Number(positionWeight),
         length_weight: Number(lengthWeight),
-      });
+      };
+      if (k) payload.k = Number(k);
+      const data = await summarize(payload);
       setResult(data);
     } catch (cause) {
       setError(cause.message);
@@ -72,8 +73,8 @@ export default function Summarizer() {
           <textarea id="summarize-text" value={text} onChange={(event) => updateField(setText, event.target.value)} rows={12} placeholder="Dán văn bản tiếng Việt vào đây…" />
           <div className="field-hint"><span>{text.length.toLocaleString('vi-VN')} ký tự</span><button type="button" className="text-button" onClick={() => { setText(toy.text); setResult(null); setError(''); }}>Nạp ví dụ</button></div>
           <div className="form-row two-cols">
-            <label className="field-group">Số chủ đề k<input type="number" min="1" max="10" value={k} onChange={(event) => updateField(setK, event.target.value)} required /></label>
-            <label className="field-group">Số câu tóm tắt<input type="number" min="1" max="5" value={sentenceCount} onChange={(event) => updateField(setSentenceCount, event.target.value)} required /></label>
+            <label className="field-group">Số chủ đề k (Tự động nếu để trống)<input type="number" min="1" max="10" value={k} onChange={(event) => updateField(setK, event.target.value)} /></label>
+            <label className="field-group">Số câu tóm tắt<input type="number" min="1" value={sentenceCount} onChange={(event) => updateField(setSentenceCount, event.target.value)} required /></label>
           </div>
           <details className="advanced-settings"><summary>Tinh chỉnh hệ số chấm điểm <span>↘</span></summary><div className="form-row three-cols"><label className="field-group">Liên quan α<input type="number" min="0" step="0.1" value={alpha} onChange={(event) => updateField(setAlpha, event.target.value)} required /></label><label className="field-group">Bao phủ β<input type="number" min="0" step="0.1" value={beta} onChange={(event) => updateField(setBeta, event.target.value)} required /></label><label className="field-group">Giảm lặp γ<input type="number" min="0" step="0.1" value={gamma} onChange={(event) => updateField(setGamma, event.target.value)} required /></label><label className="field-group">Vị trí<input type="number" min="0" step="0.05" value={positionWeight} onChange={(event) => updateField(setPositionWeight, event.target.value)} required /></label><label className="field-group">Độ dài<input type="number" min="0" step="0.05" value={lengthWeight} onChange={(event) => updateField(setLengthWeight, event.target.value)} required /></label></div></details>
           {error && <div className="alert alert-error" role="alert">{error}</div>}
