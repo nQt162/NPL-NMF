@@ -6,7 +6,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.evaluate import rouge_f1
-from .core.nmf import fit_nmf
+from .core.nmf import (
+    SPARSE_KL_ALPHA_H,
+    SPARSE_KL_ALPHA_W,
+    SPARSE_KL_L1_RATIO,
+    SPARSE_KL_LOSS_NAME,
+    SPARSE_KL_SOLVER,
+    fit_nmf,
+    select_k_by_imputation,
+)
 from .core.preprocess import preprocess_sentences
 from .core.sentences import split_sentences
 from .core.summarize import summarize
@@ -49,14 +57,42 @@ def simulate(request: SimulateRequest) -> dict:
     if len(sentences) < 2 or len(terms) < 2:
         raise HTTPException(422, "Cần ít nhất 2 câu và 2 từ hữu ích để mô phỏng NMF")
     try:
-        k_to_use = request.k
-        if k_to_use is None:
-            from .core.nmf import auto_select_k
-            k_to_use = auto_select_k(V, seed=request.seed)
-        result = fit_nmf(V, k_to_use, request.seed, request.iterations, trace=True)
+        if request.k is None:
+            k_to_use, k_candidates = select_k_by_imputation(
+                V,
+                seed=request.seed,
+                loss=SPARSE_KL_LOSS_NAME,
+                alpha_w=SPARSE_KL_ALPHA_W,
+                alpha_h=SPARSE_KL_ALPHA_H,
+                l1_ratio=SPARSE_KL_L1_RATIO,
+            )
+            k_selection_method = "masked_kl_imputation"
+        else:
+            k_to_use = min(request.k, V.shape[0], V.shape[1])
+            k_candidates = [{"k": k_to_use, "score": 0.0}]
+            k_selection_method = "requested"
+        result = fit_nmf(
+            V,
+            k_to_use,
+            request.seed,
+            request.iterations,
+            trace=True,
+            loss=SPARSE_KL_LOSS_NAME,
+            alpha_w=SPARSE_KL_ALPHA_W,
+            alpha_h=SPARSE_KL_ALPHA_H,
+            l1_ratio=SPARSE_KL_L1_RATIO,
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {
+        "k": k_to_use,
+        "loss_name": SPARSE_KL_LOSS_NAME,
+        "solver": SPARSE_KL_SOLVER,
+        "alpha_W": SPARSE_KL_ALPHA_W,
+        "alpha_H": SPARSE_KL_ALPHA_H,
+        "l1_ratio": SPARSE_KL_L1_RATIO,
+        "k_selection_method": k_selection_method,
+        "k_candidates": k_candidates,
         "sentences": sentences,
         "terms": terms,
         "V": V.tolist(),
@@ -67,6 +103,8 @@ def simulate(request: SimulateRequest) -> dict:
                 "H": item.H.tolist(),
                 "WH": item.WH.tolist(),
                 "loss": item.loss,
+                "data_loss": item.data_loss,
+                "regularization_loss": item.regularization_loss,
             }
             for item in result.snapshots
         ],

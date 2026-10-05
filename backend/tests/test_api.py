@@ -15,16 +15,29 @@ def test_health_and_simulation_snapshots() -> None:
     response = client.post("/api/simulate", json={"text": TEXT, "k": 2, "iterations": 5})
     assert response.status_code == 200
     data = response.json()
+    assert data["k"] == 2
+    assert data["loss_name"] == "kullback-leibler"
+    assert data["solver"] == "mu"
+    assert data["alpha_W"] == 0.1
+    assert data["alpha_H"] == 0.1
+    assert data["l1_ratio"] == 1.0
     assert len(data["sentences"]) == 6
     assert len(data["V"]) == 6
     assert data["snapshots"][0]["iteration"] == 0
     assert data["snapshots"][-1]["iteration"] == 5
+    assert data["snapshots"][-1]["loss"] == (
+        data["snapshots"][-1]["data_loss"]
+        + data["snapshots"][-1]["regularization_loss"]
+    )
 
 
 def test_summarize_evaluate_and_validation() -> None:
     result = client.post("/api/summarize", json={"text": TEXT, "summary_sentences": 2})
     assert result.status_code == 200
     assert len(result.json()["selected_indices"]) == 2
+    assert result.json()["k_selection_method"] == "masked_kl_imputation"
+    assert result.json()["k_candidates"]
+    assert result.json()["loss_name"] == "kullback-leibler"
 
     evaluation = client.post("/api/evaluate", json={
         "text": TEXT,

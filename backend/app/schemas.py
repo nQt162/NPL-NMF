@@ -18,7 +18,7 @@ class TextRequest(BaseModel):
 
 class SimulateRequest(TextRequest):
     k: int | None = Field(default=None, ge=1)
-    iterations: int = Field(default=10, ge=1)
+    iterations: int = Field(default=10, ge=1, le=20)
     seed: int = 42
 
 
@@ -28,9 +28,24 @@ class SnapshotResponse(BaseModel):
     H: list[list[float]]
     WH: list[list[float]]
     loss: float
+    data_loss: float
+    regularization_loss: float
+
+
+class KCandidateResponse(BaseModel):
+    k: int
+    score: float
 
 
 class SimulateResponse(BaseModel):
+    k: int
+    loss_name: str
+    solver: str
+    alpha_W: float
+    alpha_H: float
+    l1_ratio: float
+    k_selection_method: str
+    k_candidates: list[KCandidateResponse]
     sentences: list[str]
     terms: list[str]
     V: list[list[float]]
@@ -65,6 +80,14 @@ class SentenceAnalysisResponse(BaseModel):
 
 
 class SummarizeResponse(BaseModel):
+    k: int
+    loss_name: str
+    solver: str
+    alpha_W: float
+    alpha_H: float
+    l1_ratio: float
+    k_selection_method: str
+    k_candidates: list[KCandidateResponse]
     summary: str
     selected_indices: list[int]
     topics: list[TopicResponse]

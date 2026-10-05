@@ -5,7 +5,7 @@ import Summarizer from './pages/Summarizer.jsx';
 import Evaluation from './pages/Evaluation.jsx';
 
 const pages = [
-  { id: 'visualizer', number: '01', label: 'Mô phỏng NMF', caption: 'Vòng lặp & ma trận' },
+  { id: 'visualizer', number: '01', label: 'Mô phỏng NMF', caption: 'KL loss & ma trận' },
   { id: 'summarizer', number: '02', label: 'Tóm tắt văn bản', caption: 'Chủ đề & câu trích' },
   { id: 'evaluation', number: '03', label: 'Đánh giá', caption: 'Đối chứng & ROUGE' },
 ];
@@ -49,13 +49,13 @@ export default function App() {
             >
               <span className="nav-number">{page.number}</span>
               <span className="nav-copy"><strong>{page.label}</strong><small>{page.caption}</small></span>
-              <span className="nav-arrow" aria-hidden="true">↗</span>
+              <span className="nav-arrow" aria-hidden="true">→</span>
             </button>
           ))}
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-note"><span className="note-line" />Một thuật toán NMF dùng chung cho mô phỏng, tóm tắt và đánh giá.</div>
+          <div className="sidebar-note"><span className="note-line" />Luồng tóm tắt dùng TF-IDF cục bộ, NMF KL divergence và L1 sparsity.</div>
           <div className={`server-status status-${serverStatus}`} aria-live="polite">
             <span className="status-indicator" />
             {serverStatus === 'online' ? 'Backend đang kết nối' : serverStatus === 'offline' ? 'Backend chưa kết nối' : 'Đang kiểm tra backend'}
@@ -65,19 +65,19 @@ export default function App() {
 
       <main className="main-content">
         <div className="topline">
-          <span>TOPICSUM / {current.number} — {current.label.toUpperCase()}</span>
+          <span>TOPICSUM / {current.number} - {current.label.toUpperCase()}</span>
           <span className="topline-tag">TRÍCH XUẤT · TIẾNG VIỆT</span>
         </div>
         <header className="hero">
           <div className="hero-copy">
             <div className="eyebrow"><span className="eyebrow-line" />PHÂN TÍCH CHỦ ĐỀ BẰNG NMF</div>
             <h1>Từ văn bản đến <em>ý chính.</em></h1>
-            <p>Quan sát ma trận, chọn câu theo chủ đề và đo chất lượng tóm tắt trên cùng một quy trình.</p>
+            <p>Quan sát ma trận, chọn câu theo chủ đề và đo chất lượng tóm tắt với cấu hình NMF phù hợp văn bản thưa.</p>
           </div>
           <div className="hero-visual" aria-hidden="true">
             <div className="hero-grid"><span /><span /><span /><span /><span /><span /><span /><span /><span /></div>
-            <div className="hero-formula">V <span>≈</span> W × H</div>
-            <div className="hero-formula-note">SENTENCES × TERMS</div>
+            <div className="hero-formula">V <span>≈</span> W x H</div>
+            <div className="hero-formula-note">SENTENCES x TERMS</div>
           </div>
         </header>
 
@@ -86,7 +86,7 @@ export default function App() {
           {active === 'summarizer' && <Summarizer />}
           {active === 'evaluation' && <Evaluation />}
         </div>
-        <footer className="site-footer"><span>TOPICSUM / NPL–NMF</span><span>Giữ nguyên câu gốc · Không sinh văn bản bằng LLM</span></footer>
+        <footer className="site-footer"><span>TOPICSUM / NPL-NMF</span><span>Giữ nguyên câu gốc · Không sinh văn bản bằng LLM</span></footer>
       </main>
     </div>
   );
