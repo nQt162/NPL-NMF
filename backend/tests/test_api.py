@@ -38,6 +38,8 @@ def test_summarize_evaluate_and_validation() -> None:
     assert result.json()["k_selection_method"] == "masked_kl_imputation"
     assert result.json()["k_candidates"]
     assert result.json()["loss_name"] == "kullback-leibler"
+    assert result.json()["selection_method"] == "maximum_marginal_relevance"
+    assert result.json()["mmr_lambda"] == 0.7
 
     evaluation = client.post("/api/evaluate", json={
         "text": TEXT,

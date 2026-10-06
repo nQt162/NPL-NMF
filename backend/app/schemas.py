@@ -55,11 +55,7 @@ class SimulateResponse(BaseModel):
 class SummarizeRequest(TextRequest):
     k: int | None = Field(default=None, ge=1)
     summary_sentences: int = Field(default=3, ge=1)
-    alpha: float = Field(default=1, ge=0, allow_inf_nan=False)
-    beta: float = Field(default=1, ge=0, allow_inf_nan=False)
-    gamma: float = Field(default=0.5, ge=0, allow_inf_nan=False)
-    position_weight: float = Field(default=0.15, ge=0, allow_inf_nan=False)
-    length_weight: float = Field(default=0.1, ge=0, allow_inf_nan=False)
+    mmr_lambda: float = Field(default=0.7, ge=0, le=1, allow_inf_nan=False)
 
 
 class TopicResponse(BaseModel):
@@ -71,10 +67,7 @@ class SentenceAnalysisResponse(BaseModel):
     text: str
     selected: bool
     relevance: float
-    coverage_gain: float
     redundancy: float
-    position_prior: float
-    length_quality: float
     score: float
     dominant_topic: int | None
 
@@ -88,6 +81,8 @@ class SummarizeResponse(BaseModel):
     l1_ratio: float
     k_selection_method: str
     k_candidates: list[KCandidateResponse]
+    selection_method: str
+    mmr_lambda: float
     summary: str
     selected_indices: list[int]
     topics: list[TopicResponse]

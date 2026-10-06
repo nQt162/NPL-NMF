@@ -1,82 +1,119 @@
-# Tong hop cac cai tien NMF
+# Tổng hợp các cải tiến NMF
 
-Tai lieu nay tom tat cac thay doi da thuc hien cho project NMF/TopicSum, muc tieu cua tung thay doi, hieu qua so voi phien ban cu va vi tri code lien quan.
+Tài liệu này tổng hợp các thay đổi đã thực hiện cho project NMF/TopicSum, gồm: phần cũ hoạt động như thế nào, đã cải tiến ra sao, hiệu quả khác gì trước, và các file/đoạn code liên quan.
 
-## 1. Tong quan truoc va sau
+## 1. Tổng quan trước và sau
 
-| Hang muc | Truoc khi sua | Sau khi sua | Hieu qua |
+| Hạng mục | Trước khi sửa | Sau khi sửa | Hiệu quả |
 | --- | --- | --- | --- |
-| Luong tom tat | Dung global NMF model tu `nmf_corpus.joblib` da train san tren corpus lon | Fit NMF cuc bo tren chinh van ban nguoi dung nhap | Tom tat bam noi dung cuc bo, khong bi lan tu vung cua corpus cu |
-| Don vi tai lieu | Van ban nguoi dung bi dua vao model toan cuc | Moi cau trong van ban la mot document rieng | Phu hop hon voi extractive summarization cho van ban ngan |
-| TF-IDF | Phu thuoc vocabulary/model da train tu truoc | Tao `TfidfVectorizer` moi va `fit_transform` tren cac cau dau vao | Loai bo loi out-of-vocabulary do vocabulary cu |
-| Loss NMF | Frobenius/MSE mac dinh hoac objective cu | KL divergence + L1 regularization | Phu hop hon voi du lieu van ban thua, topic sac net hon |
-| Solver | Mac dinh cua sklearn | `solver="mu"` | Dung yeu cau cua sklearn khi dung `beta_loss="kullback-leibler"` |
-| Sparsity | Khong co L1 penalty ro rang | `alpha_W=0.1`, `alpha_H=0.1`, `l1_ratio=1.0` | Ep W va H thua hon, giam tu khoa nhieu va topic chong cheo |
-| Chon k | Heuristic/fixed k | Masked KL imputation neu nguoi dung de trong k | Chon k dua tren kha nang tai tao du lieu bi che, thuc te hon heuristic cung |
-| Chon cau | De bi phu thuoc diem don gian tu W | Greedy scoring gom salience, coverage, redundancy, vi tri va do dai | Giam trung lap, tang bao phu y chinh, giu thu tu goc khi xuat summary |
-| Hien thi frontend | Loss/k de gay hieu nham voi cau hinh cu | Hien thi KL + L1, KL data, L1 penalty, candidate k, topic/cau | Nguoi dung thay duoc backend dang dung objective moi |
+| Luồng tóm tắt | Dùng global NMF model từ `nmf_corpus.joblib` đã train sẵn trên corpus lớn | Fit NMF cục bộ trên chính văn bản người dùng nhập | Tóm tắt bám nội dung cục bộ, không bị lẫn từ vựng của corpus cũ |
+| Đơn vị tài liệu | Văn bản người dùng bị đưa vào model toàn cục | Mỗi câu trong văn bản là một document riêng | Phù hợp hơn với extractive summarization cho văn bản ngắn |
+| TF-IDF | Phụ thuộc vocabulary/model đã train từ trước | Tạo vectorizer mới và `fit_transform` trên các câu đầu vào | Loại bỏ lỗi out-of-vocabulary do vocabulary cũ |
+| Loss NMF | Frobenius/MSE mặc định hoặc objective cũ | KL divergence + L1 regularization | Phù hợp hơn với dữ liệu văn bản thưa, topic sắc nét hơn |
+| Solver | Mặc định của sklearn | `solver="mu"` | Đúng yêu cầu của sklearn khi dùng `beta_loss="kullback-leibler"` |
+| Sparsity | Không có L1 penalty rõ ràng | `alpha_W=0.1`, `alpha_H=0.1`, `l1_ratio=1.0` | Ép W và H thưa hơn, giảm từ khóa nhiễu và topic chồng chéo |
+| Chọn k | Heuristic/fixed k | Masked KL imputation nếu người dùng để trống k | Chọn k dựa trên khả năng tái tạo dữ liệu bị che, thực tế hơn heuristic cứng |
+| Chọn câu | Dễ phụ thuộc điểm đơn giản từ W | Maximum Marginal Relevance chuẩn: `λ * relevance - (1 - λ) * redundancy` | Giảm trùng lặp, vẫn ưu tiên câu liên quan nhất, giữ thứ tự gốc khi xuất summary |
+| Hiển thị frontend | Loss/k dễ gây hiểu nhầm với cấu hình cũ | Hiển thị KL + L1, KL data, L1 penalty, candidate k, topic/câu | Người dùng thấy rõ backend đang dùng objective mới |
 
-## 2. Bo global model `nmf_corpus.joblib`
+## Cập nhật mới nhất: chuẩn hóa MMR
 
-### Van de cu
+Sau lần sửa mới nhất, phần chọn câu tóm tắt đã được chuyển từ scoring mở rộng tự thiết kế sang Maximum Marginal Relevance chuẩn.
 
-Phien ban cu load mot NMF model toan cuc tu file `nmf_corpus.joblib`. Model nay da hoc vocabulary va ma tran chu de tu corpus lon, nen khi nguoi dung nhap van ban ngan, cac topic va tu khoa co the den tu corpus cu thay vi tu doan van hien tai.
+Trước đó, hệ thống dùng công thức kết hợp nhiều thành phần:
 
-### Cai tien da lam
+```text
+score = alpha * relevance + beta * coverage_gain + position_weight * position_prior + length_weight * length_quality - gamma * redundancy
+```
 
-- Xoa luong phu thuoc vao `joblib.load()` va global corpus model trong flow tom tat.
-- Xoa file code wrapper global model `backend/app/core/corpus_model.py`.
-- Go bo package-data lien quan den `nmf_corpus.joblib` trong `backend/pyproject.toml`.
-- API tom tat goi truc tiep local summarizer.
+Sau khi chuẩn hóa, hệ thống dùng đúng công thức MMR:
 
-### File lien quan
+```text
+MMR(s) = λ * relevance(s) - (1 - λ) * max_similarity(s, selected)
+```
 
-- `backend/app/core/corpus_model.py`: da xoa.
-- `backend/pyproject.toml`: bo dong dong goi `nmf_corpus.joblib`.
-- `backend/app/main.py:114`: endpoint `/api/summarize` goi ham `summarize(...)`.
-- `backend/app/core/summarize.py:217`: ham `summarize(...)` la luong tom tat moi.
+Ý nghĩa thay đổi:
 
-## 3. Local NMF on-the-fly cho tom tat
+- `relevance` được lấy từ topic distribution của NMF, thể hiện mức đại diện của câu với các chủ đề chính.
+- `redundancy` được tính bằng cosine similarity giữa câu ứng viên và các câu đã chọn.
+- `mmr_lambda` mặc định là `0.7`; giá trị này càng gần 1 thì càng ưu tiên câu liên quan, càng gần 0 thì càng phạt trùng lặp mạnh.
+- Các thành phần `coverage_gain`, `position_prior`, `length_quality`, `alpha`, `beta`, `gamma` không còn nằm trong công thức chọn câu chính.
+- Frontend đã đổi sang một control duy nhất là `MMR λ`, đồng thời hiển thị `Relevance`, `Redundancy` và `MMR score` cho từng câu.
 
-### Van de cu
+File đã cập nhật:
 
-Global model khong phan anh cac y chinh cuc bo cua doan van ngan. Khi vocabulary cua nguoi dung khac vocabulary corpus train, ket qua transform de lech.
+- `backend/app/core/summarize.py`: triển khai MMR chuẩn trong `_select_sentences(...)`.
+- `backend/app/schemas.py`: thêm `mmr_lambda`, `selection_method`; bỏ các trường scoring cũ khỏi sentence analysis.
+- `frontend/src/pages/Summarizer.jsx`: đổi UI sang tham số `MMR λ`.
+- `backend/tests/test_summary.py` và `backend/tests/test_api.py`: thêm kiểm tra MMR.
 
-### Cai tien da lam
+## 2. Bỏ global model `nmf_corpus.joblib`
 
-Luong moi trong `backend/app/core/summarize.py`:
+### Vấn đề cũ
 
-1. Tach cau tu text dau vao.
-2. Tien xu ly tung cau.
-3. Tao ma tran TF-IDF cuc bo tren chinh danh sach cau.
-4. Chon hoac suy ra `k`.
-5. Fit NMF moi tren ma tran cuc bo.
-6. Lay topic terms tu ma tran H moi.
-7. Chon cau va ghep lai theo thu tu goc.
+Phiên bản cũ load một NMF model toàn cục từ file `nmf_corpus.joblib`. Model này đã học vocabulary và ma trận chủ đề từ corpus lớn, nên khi người dùng nhập văn bản ngắn, topic và từ khóa có thể đến từ corpus cũ thay vì từ chính đoạn văn hiện tại.
 
-### Hieu qua
+### Cải tiến đã làm
 
-- Topic va tu khoa den tu van ban hien tai.
-- Tom tat hop ly hon voi van ban ngan.
-- Khong con hien tuong lay tu khoa ngoai ngu canh tu corpus cu.
+- Xóa luồng phụ thuộc vào `joblib.load()` và global corpus model trong flow tóm tắt.
+- Xóa file code wrapper global model `backend/app/core/corpus_model.py`.
+- Gỡ bỏ package-data liên quan đến `nmf_corpus.joblib` trong `backend/pyproject.toml`.
+- API tóm tắt gọi trực tiếp local summarizer.
 
-### File lien quan
+### Hiệu quả
 
-- `backend/app/core/summarize.py:217`: ham tong `summarize(...)`.
-- `backend/app/core/summarize.py:254`: chon hoac resolve `k`.
-- `backend/app/core/summarize.py:258`: fit local KL-NMF.
-- `backend/app/core/summarize.py:259`: chon cau theo greedy scoring.
-- `backend/app/core/summarize.py:269`: ghep summary theo thu tu cau goc.
+- Không còn dùng topic/vocabulary của 3260 bài báo cũ để tóm tắt văn bản mới.
+- Tránh lỗi lấy từ khóa ngoài ngữ cảnh.
+- Luồng tóm tắt đúng bản chất hơn: học chủ đề từ chính văn bản đầu vào.
 
-## 4. Doi objective sang KL divergence + L1 sparsity
+### File liên quan
 
-### Van de cu
+- `backend/app/core/corpus_model.py`: đã xóa.
+- `backend/pyproject.toml`: bỏ dòng đóng gói `nmf_corpus.joblib`.
+- `backend/app/main.py:114`: endpoint `/api/summarize` gọi hàm `summarize(...)`.
+- `backend/app/core/summarize.py:215`: hàm `summarize(...)` là luồng tóm tắt mới.
 
-Frobenius/MSE xem sai so tai tao nhu binh phuong khoang cach Euclidean. Voi du lieu text sparse nhu TF-IDF, cach nay thuong tao topic kem sac net hon va de co tu khoa nhieu.
+## 3. Local NMF on-the-fly cho tóm tắt
 
-### Cai tien da lam
+### Vấn đề cũ
 
-Cau hinh NMF moi:
+Global model không phản ánh các ý chính cục bộ của đoạn văn ngắn. Khi vocabulary của người dùng khác vocabulary corpus train, kết quả transform dễ lệch.
+
+### Cải tiến đã làm
+
+Luồng mới trong `backend/app/core/summarize.py`:
+
+1. Tách câu từ text đầu vào.
+2. Tiền xử lý từng câu.
+3. Tạo ma trận TF-IDF cục bộ trên chính danh sách câu.
+4. Chọn hoặc suy ra `k`.
+5. Fit NMF mới trên ma trận cục bộ.
+6. Lấy topic terms từ ma trận H mới.
+7. Chọn câu và ghép lại theo thứ tự gốc.
+
+### Hiệu quả
+
+- Topic và từ khóa đến từ văn bản hiện tại.
+- Tóm tắt hợp lý hơn với văn bản ngắn.
+- Không còn hiện tượng lấy từ khóa ngoài ngữ cảnh từ corpus cũ.
+
+### File liên quan
+
+- `backend/app/core/summarize.py:215`: hàm tổng `summarize(...)`.
+- `backend/app/core/summarize.py:251`: chọn hoặc resolve `k`.
+- `backend/app/core/summarize.py:263`: fit local KL-NMF.
+- `backend/app/core/summarize.py:264`: chọn câu bằng MMR chuẩn.
+- `backend/app/core/summarize.py:279`: ghép summary theo thứ tự câu gốc.
+
+## 4. Đổi objective sang KL divergence + L1 sparsity
+
+### Vấn đề cũ
+
+Frobenius/MSE xem sai số tái tạo như bình phương khoảng cách Euclidean. Với dữ liệu text sparse như TF-IDF, cách này thường tạo topic kém sắc nét hơn và dễ có từ khóa nhiễu.
+
+### Cải tiến đã làm
+
+Cấu hình NMF mới:
 
 ```python
 NMF(
@@ -92,148 +129,150 @@ NMF(
 )
 ```
 
-### Hieu qua
+### Hiệu quả
 
-- KL divergence phu hop hon voi du lieu khong am, thua va co tinh phan phoi nhu tan suat/TF-IDF.
-- `solver="mu"` la solver phu hop khi dung KL trong sklearn.
-- L1 tren W giup moi cau tap trung vao it chu de hon.
-- L1 tren H giup moi topic co bo tu khoa dac trung hon.
-- `max_iter=500` giup MU solver co nhieu vong lap hon de hoi tu.
+- KL divergence phù hợp hơn với dữ liệu không âm, thưa và có tính phân phối như tần suất/TF-IDF.
+- `solver="mu"` là solver phù hợp khi dùng KL trong sklearn.
+- L1 trên W giúp mỗi câu tập trung vào ít chủ đề hơn.
+- L1 trên H giúp mỗi topic có bộ từ khóa đặc trưng hơn.
+- `max_iter=500` giúp MU solver có nhiều vòng lặp hơn để hội tụ.
 
-### File lien quan
+### File liên quan
 
-- `backend/app/core/nmf.py:14`: khai bao `SPARSE_KL_LOSS_NAME = "kullback-leibler"`.
-- `backend/app/core/nmf.py:15`: khai bao `SPARSE_KL_SOLVER = "mu"`.
-- `backend/app/core/nmf.py:16`: khai bao `SPARSE_KL_ALPHA_W = 0.1`.
-- `backend/app/core/nmf.py:17`: khai bao `SPARSE_KL_ALPHA_H = 0.1`.
-- `backend/app/core/nmf.py:18`: khai bao `SPARSE_KL_L1_RATIO = 1.0`.
-- `backend/app/core/nmf.py:19`: khai bao `SPARSE_KL_MAX_ITER = 500`.
-- `backend/app/core/summarize.py:109`: khoi tao sklearn `NMF`.
-- `backend/app/core/summarize.py:112`: gan `solver=SPARSE_KL_SOLVER`.
-- `backend/app/core/summarize.py:113`: gan `beta_loss=SPARSE_KL_LOSS_NAME`.
-- `backend/app/core/summarize.py:114`: gan `alpha_W=SPARSE_KL_ALPHA_W`.
-- `backend/app/core/summarize.py:115`: gan `alpha_H=SPARSE_KL_ALPHA_H`.
-- `backend/app/core/summarize.py:116`: gan `l1_ratio=SPARSE_KL_L1_RATIO`.
-- `backend/app/core/summarize.py:117`: gan `max_iter=SPARSE_KL_MAX_ITER`.
+- `backend/app/core/nmf.py:14`: khai báo `SPARSE_KL_LOSS_NAME = "kullback-leibler"`.
+- `backend/app/core/nmf.py:15`: khai báo `SPARSE_KL_SOLVER = "mu"`.
+- `backend/app/core/nmf.py:16`: khai báo `SPARSE_KL_ALPHA_W = 0.1`.
+- `backend/app/core/nmf.py:17`: khai báo `SPARSE_KL_ALPHA_H = 0.1`.
+- `backend/app/core/nmf.py:18`: khai báo `SPARSE_KL_L1_RATIO = 1.0`.
+- `backend/app/core/nmf.py:19`: khai báo `SPARSE_KL_MAX_ITER = 500`.
+- `backend/app/core/summarize.py:109`: khởi tạo sklearn `NMF`.
+- `backend/app/core/summarize.py:112`: gán `solver=SPARSE_KL_SOLVER`.
+- `backend/app/core/summarize.py:113`: gán `beta_loss=SPARSE_KL_LOSS_NAME`.
+- `backend/app/core/summarize.py:114`: gán `alpha_W=SPARSE_KL_ALPHA_W`.
+- `backend/app/core/summarize.py:115`: gán `alpha_H=SPARSE_KL_ALPHA_H`.
+- `backend/app/core/summarize.py:116`: gán `l1_ratio=SPARSE_KL_L1_RATIO`.
+- `backend/app/core/summarize.py:117`: gán `max_iter=SPARSE_KL_MAX_ITER`.
 
-## 5. Loss moi trong mo phong NMF
+## 5. Loss mới trong mô phỏng NMF
 
-### Van de cu
+### Vấn đề cũ
 
-Frontend van hien thi loss cu, lam nguoi dung tuong rang backend chua doi objective.
+Frontend vẫn hiển thị loss cũ hoặc chỉ một số loss chung, làm người dùng tưởng backend chưa đổi objective.
 
-### Cai tien da lam
+### Cải tiến đã làm
 
-- Backend tra ve `loss_name`, `solver`, `alpha_W`, `alpha_H`, `l1_ratio`.
-- Snapshot tra ve them:
+- Backend trả về `loss_name`, `solver`, `alpha_W`, `alpha_H`, `l1_ratio`.
+- Snapshot trả thêm:
   - `loss`: total loss.
-  - `data_loss`: phan KL data loss.
-  - `regularization_loss`: phan L1 penalty.
-- Frontend hien thi ro `KL + L1 loss`, `KL data`, `L1 penalty`.
+  - `data_loss`: phần KL data loss.
+  - `regularization_loss`: phần L1 penalty.
+- Frontend hiển thị rõ `KL + L1 loss`, `KL data`, `L1 penalty`.
 
-### Hieu qua
+### Hiệu quả
 
-- Nguoi dung doc dung ban chat loss hien tai.
-- Co the tach duoc phan loi tai tao du lieu va phan penalty dieu chuan.
-- Gia tri loss la so thap phan binh thuong, nhung khong nen so truc tiep voi Frobenius loss cu vi objective da khac.
+- Người dùng đọc đúng bản chất loss hiện tại.
+- Có thể tách được phần lỗi tái tạo dữ liệu và phần penalty điều chuẩn.
+- Giá trị loss là số thập phân bình thường, nhưng không nên so trực tiếp với Frobenius loss cũ vì objective đã khác.
 
-### File lien quan
+### File liên quan
 
-- `backend/app/core/nmf.py:44`: `Snapshot` co `data_loss` va `regularization_loss`.
-- `backend/app/core/nmf.py:76`: `objective_breakdown(...)` tinh data loss va regularization.
-- `backend/app/main.py:89`: API tra `loss_name`.
-- `backend/app/main.py:90`: API tra `solver`.
-- `backend/app/main.py:91`: API tra `alpha_W`.
-- `backend/app/main.py:92`: API tra `alpha_H`.
-- `backend/app/main.py:93`: API tra `l1_ratio`.
-- `backend/app/main.py:104`: snapshot tra `data_loss`.
-- `backend/app/main.py:105`: snapshot tra `regularization_loss`.
+- `backend/app/core/nmf.py:44`: `Snapshot` có `data_loss` và `regularization_loss`.
+- `backend/app/core/nmf.py:76`: `objective_breakdown(...)` tính data loss và regularization.
+- `backend/app/main.py:89`: API trả `loss_name`.
+- `backend/app/main.py:90`: API trả `solver`.
+- `backend/app/main.py:91`: API trả `alpha_W`.
+- `backend/app/main.py:92`: API trả `alpha_H`.
+- `backend/app/main.py:93`: API trả `l1_ratio`.
+- `backend/app/main.py:104`: snapshot trả `data_loss`.
+- `backend/app/main.py:105`: snapshot trả `regularization_loss`.
 - `backend/app/schemas.py:25`: schema `SnapshotResponse`.
-- `frontend/src/pages/Visualizer.jsx:141`: hien thi ten loss.
+- `frontend/src/pages/Visualizer.jsx:141`: hiển thị tên loss.
 - `frontend/src/pages/Visualizer.jsx:143`: block breakdown loss.
-- `frontend/src/pages/Visualizer.jsx:144`: hien thi `KL data`.
-- `frontend/src/pages/Visualizer.jsx:145`: hien thi `L1 penalty`.
+- `frontend/src/pages/Visualizer.jsx:144`: hiển thị `KL data`.
+- `frontend/src/pages/Visualizer.jsx:145`: hiển thị `L1 penalty`.
 
-## 6. Cai tien cach tu dong tim k
+## 6. Cải tiến cách tự động tìm k
 
-### Van de cu
+### Vấn đề cũ
 
-Cong thuc `k = max(1, len(sentences) // 2)` don gian, de sai voi van ban co it/nhieu chu de that. Fixed k cung khong linh hoat.
+Công thức `k = max(1, len(sentences) // 2)` đơn giản, dễ sai với văn bản có ít/nhiều chủ đề thật. Fixed k cũng không linh hoạt.
 
-### Cai tien da lam
+### Cải tiến đã làm
 
-Neu nguoi dung khong nhap k:
+Nếu người dùng không nhập k:
 
-1. Lay cac o TF-IDF duong.
-2. Che mot phan cac o nay lam validation.
-3. Fit NMF voi nhieu ung vien k.
-4. Tai tao cac o bi che.
-5. Tinh KL imputation error.
-6. Chon k co diem thap nhat.
+1. Lấy các ô TF-IDF dương.
+2. Che một phần các ô này làm validation.
+3. Fit NMF với nhiều ứng viên k.
+4. Tái tạo các ô bị che.
+5. Tính KL imputation error.
+6. Chọn k có điểm thấp nhất.
 
-### Hieu qua
+### Hiệu quả
 
-- K duoc chon dua tren du lieu dau vao, khong phai chi dua vao so cau.
-- Giam nguy co chon k qua lon cho van ban ngan.
-- Giam nguy co ep tat ca van ban vao 1 topic khi co nhieu cum y ro.
+- K được chọn dựa trên dữ liệu đầu vào, không chỉ dựa vào số câu.
+- Giảm nguy cơ chọn k quá lớn cho văn bản ngắn.
+- Giảm nguy cơ ép tất cả văn bản vào 1 topic khi có nhiều cụm ý rõ.
 
-### File lien quan
+### File liên quan
 
 - `backend/app/core/nmf.py:20`: `K_SELECTION_MAX_K = 6`.
 - `backend/app/core/nmf.py:21`: `K_SELECTION_TRIALS = 3`.
 - `backend/app/core/nmf.py:22`: `K_SELECTION_VALIDATION_FRACTION = 0.2`.
-- `backend/app/core/nmf.py:305`: ham `select_k_by_imputation(...)`.
-- `backend/app/core/nmf.py:326`: gioi han ung vien k.
-- `backend/app/core/nmf.py:327`: dat lower bound k cho van ban co du du lieu.
-- `backend/app/core/nmf.py:341`: tao danh sach ung vien k.
-- `backend/app/core/nmf.py:359`: tinh KL error tren phan bi che.
-- `backend/app/core/nmf.py:368`: sap xep va chon k tot nhat.
-- `backend/app/core/summarize.py:97`: tom tat goi `select_k_by_imputation(...)`.
-- `backend/app/main.py:61`: simulate goi `select_k_by_imputation(...)`.
-- `frontend/src/pages/Visualizer.jsx:156`: hien thi cac candidate k.
-- `frontend/src/pages/Summarizer.jsx:132`: hien thi cac candidate k trong trang tom tat.
+- `backend/app/core/nmf.py:305`: hàm `select_k_by_imputation(...)`.
+- `backend/app/core/nmf.py:326`: giới hạn ứng viên k.
+- `backend/app/core/nmf.py:327`: đặt lower bound k cho văn bản có đủ dữ liệu.
+- `backend/app/core/nmf.py:341`: tạo danh sách ứng viên k.
+- `backend/app/core/nmf.py:359`: tính KL error trên phần bị che.
+- `backend/app/core/nmf.py:368`: sắp xếp và chọn k tốt nhất.
+- `backend/app/core/summarize.py:85`: tóm tắt gọi `select_k_by_imputation(...)`.
+- `backend/app/main.py:61`: simulate gọi `select_k_by_imputation(...)`.
+- `frontend/src/pages/Visualizer.jsx:156`: hiển thị các candidate k.
+- `frontend/src/pages/Summarizer.jsx:125`: hiển thị các candidate k trong trang tóm tắt.
 
-## 7. Cai tien cach chon cau tom tat
+## 7. Cải tiến cách chọn câu tóm tắt bằng MMR chuẩn
 
-### Van de cu
+### Vấn đề cũ
 
-Neu chi lay cau co tong trong so W cao nhat, summary co the bi trung lap y, bo sot topic phu hoac chon cau qua ngan/qua dai.
+Nếu chỉ lấy câu có tổng trọng số W cao nhất, summary có thể bị trùng lặp ý vì các câu cùng nói về một nội dung vẫn đều có điểm cao.
 
-### Cai tien da lam
+### Cải tiến đã làm
 
-Ham chon cau moi dung greedy scoring:
+Hàm chọn câu mới dùng Maximum Marginal Relevance chuẩn:
 
-- `relevance`: cau co lien quan manh den topic salience.
-- `coverage_gain`: cau bo sung topic chua duoc phu.
-- `redundancy`: phat cau qua giong cau da chon.
-- `position_prior`: uu tien nhe cau o dau van ban.
-- `length_quality`: tranh cau qua ngan hoac qua dai.
+```text
+MMR(s) = λ * relevance(s) - (1 - λ) * max_similarity(s, selected)
+```
 
-Sau khi chon xong, cac cau duoc sap xep lai theo index goc truoc khi ghep summary.
+Trong đó:
 
-### Hieu qua
+- `relevance`: độ liên quan của câu với các topic chính từ NMF.
+- `redundancy`: cosine similarity lớn nhất giữa câu ứng viên và các câu đã chọn.
+- `mmr_lambda`: tham số cân bằng giữa liên quan và chống trùng lặp, mặc định `0.7`.
 
-- Summary bot lap y.
-- Bao phu nhieu chu de hon.
-- Van ban tom tat doc troi chay hon vi giu thu tu xuat hien ban dau.
+Sau khi chọn xong, các câu được sắp xếp lại theo index gốc trước khi ghép summary.
 
-### File lien quan
+### Hiệu quả
 
-- `backend/app/core/summarize.py:124`: ham `_select_sentences(...)`.
-- `backend/app/core/summarize.py:137`: tinh topic salience.
-- `backend/app/core/summarize.py:151`: tinh relevance.
-- `backend/app/core/summarize.py:152`: tinh coverage gain.
-- `backend/app/core/summarize.py:154`: tinh redundancy.
-- `backend/app/core/summarize.py:166`: cong thuc score tong.
-- `backend/app/core/summarize.py:188`: cap nhat coverage sau khi chon cau.
-- `backend/app/core/summarize.py:190`: sap xep cau da chon theo thu tu goc.
-- `backend/app/core/summarize.py:269`: ghep summary tu cac cau theo thu tu goc.
+- Summary bớt lặp ý nhờ hình phạt redundancy chuẩn MMR.
+- Vẫn ưu tiên câu đại diện tốt cho chủ đề chính nhờ relevance từ ma trận W.
+- Văn bản tóm tắt đọc trôi chảy hơn vì giữ thứ tự xuất hiện ban đầu.
 
-## 8. Mo rong API contract
+### File liên quan
 
-### Cai tien da lam
+- `backend/app/core/summarize.py:130`: hàm `_topic_relevance(...)` tính relevance từ NMF.
+- `backend/app/core/summarize.py:146`: hàm `_max_similarity_to_selected(...)` tính redundancy.
+- `backend/app/core/summarize.py:164`: hàm `_select_sentences(...)`.
+- `backend/app/core/summarize.py:187`: công thức MMR chuẩn.
+- `backend/app/core/summarize.py:199`: chọn câu có MMR score cao nhất.
+- `backend/app/core/summarize.py:202`: sắp xếp câu đã chọn theo thứ tự gốc.
+- `backend/app/core/summarize.py:279`: ghép summary từ các câu theo thứ tự gốc.
 
-Schema API duoc mo rong de frontend/doc/debug biet ro backend dang dung cau hinh nao:
+## 8. Mở rộng API contract
+
+### Cải tiến đã làm
+
+Schema API được mở rộng để frontend/doc/debug biết rõ backend đang dùng cấu hình nào:
 
 - `k`.
 - `loss_name`.
@@ -243,57 +282,61 @@ Schema API duoc mo rong de frontend/doc/debug biet ro backend dang dung cau hinh
 - `l1_ratio`.
 - `k_selection_method`.
 - `k_candidates`.
+- `selection_method`.
+- `mmr_lambda`.
 - `data_loss`.
 - `regularization_loss`.
 
-### Hieu qua
+### Hiệu quả
 
-- Frontend khong can doan cau hinh backend.
-- De debug khi thay loss/k khac ky vong.
-- Phu hop hon voi yeu cau giai thich qua trinh NMF.
+- Frontend không cần đoán cấu hình backend.
+- Dễ debug khi thấy loss/k khác kỳ vọng.
+- Phù hợp hơn với yêu cầu giải thích quá trình NMF.
 
-### File lien quan
+### File liên quan
 
 - `backend/app/schemas.py:25`: `SnapshotResponse`.
 - `backend/app/schemas.py:36`: `KCandidateResponse`.
 - `backend/app/schemas.py:40`: `SimulateResponse`.
 - `backend/app/schemas.py:82`: `SummarizeResponse`.
 - `backend/app/main.py:88`: response `/api/simulate`.
-- `backend/app/core/summarize.py:270`: response `/api/summarize`.
+- `backend/app/core/summarize.py:272`: response `/api/summarize`.
 
-## 9. Cai tien frontend
+## 9. Cải tiến frontend
 
-### Cai tien da lam
+### Cải tiến đã làm
 
-- Trang mo phong ghi ro NMF dang dung KL + L1.
-- Trang tom tat de trong k mac dinh de backend tu chon.
-- Hien thi candidate k va diem tung candidate.
-- Hien thi topic terms tu H cuc bo.
-- Hien thi phan tich tung cau: topic chinh, salience, coverage, redundancy va score.
-- Hien thi loss breakdown thay vi chi mot so loss chung.
+- Trang mô phỏng ghi rõ NMF đang dùng KL + L1.
+- Trang tóm tắt để trống k mặc định để backend tự chọn.
+- Trang tóm tắt có tham số `MMR λ` để cân bằng relevance và redundancy.
+- Hiển thị candidate k và điểm từng candidate.
+- Hiển thị topic terms từ H cục bộ.
+- Hiển thị phân tích từng câu: topic chính, relevance, redundancy và MMR score.
+- Hiển thị loss breakdown thay vì chỉ một số loss chung.
 
-### Hieu qua
+### Hiệu quả
 
-- Giao dien trung thuc hon voi backend moi.
-- Nguoi dung nhin duoc vi sao he thong chon k va chon cau.
-- Tot hon cho demo, bao cao va giai thich thuat toan.
+- Giao diện trung thực hơn với backend mới.
+- Người dùng nhìn được vì sao hệ thống chọn k và chọn câu.
+- Tốt hơn cho demo, báo cáo và giải thích thuật toán.
 
-### File lien quan
+### File liên quan
 
-- `frontend/src/App.jsx:58`: mo ta luong TF-IDF cuc bo, KL divergence va L1 sparsity.
-- `frontend/src/pages/Visualizer.jsx:91`: mo ta masked imputation va KL/L1.
-- `frontend/src/pages/Visualizer.jsx:141`: hien thi loss.
-- `frontend/src/pages/Visualizer.jsx:143`: hien thi breakdown.
-- `frontend/src/pages/Visualizer.jsx:156`: hien thi candidate k.
-- `frontend/src/pages/Summarizer.jsx:77`: mo ta luong tom tat moi.
-- `frontend/src/pages/Summarizer.jsx:89`: input k co placeholder tu chon.
-- `frontend/src/pages/Summarizer.jsx:132`: hien thi candidate k.
+- `frontend/src/App.jsx:58`: mô tả luồng TF-IDF cục bộ, KL divergence và L1 sparsity.
+- `frontend/src/pages/Visualizer.jsx:91`: mô tả masked imputation và KL/L1.
+- `frontend/src/pages/Visualizer.jsx:141`: hiển thị loss.
+- `frontend/src/pages/Visualizer.jsx:143`: hiển thị breakdown.
+- `frontend/src/pages/Visualizer.jsx:156`: hiển thị candidate k.
+- `frontend/src/pages/Summarizer.jsx:45`: gửi `mmr_lambda` lên backend.
+- `frontend/src/pages/Summarizer.jsx:88`: input tham số `MMR λ`.
+- `frontend/src/pages/Summarizer.jsx:120`: hiển thị `MMR λ` trong kết quả.
+- `frontend/src/pages/Summarizer.jsx:134`: hiển thị relevance, redundancy và MMR score.
 - `frontend/src/styles.css:139`: style loss breakdown.
 - `frontend/src/styles.css:150`: style candidate k.
 
-## 10. Kiem thu da chay
+## 10. Kiểm thử đã chạy
 
-Da chay cac kiem thu chinh:
+Đã chạy các kiểm thử chính:
 
 ```powershell
 backend\.venv\Scripts\python.exe -m pytest backend\tests
@@ -301,29 +344,30 @@ npm run build
 npm test
 ```
 
-Ket qua:
+Kết quả:
 
 - Backend tests: 14 passed.
 - Frontend tests: 2 passed.
-- Frontend build: thanh cong.
+- Frontend build: thành công.
 
-## 11. Danh gia muc do dung voi paper va thuc te
+## 11. Đánh giá mức độ đúng với paper và thực tế
 
-### Diem dung huong
+### Điểm đúng hướng
 
-- KL divergence la mot mo rong NMF phu hop cho du lieu khong am va co tinh phan phoi.
-- Multiplicative Update la solver dung khi dung KL divergence trong sklearn.
-- L1 regularization tren W/H dung muc tieu tao sparsity.
-- Local NMF dung ban chat extractive summarization cho van ban ngan.
-- Chon k bang masked imputation thuc te hon heuristic cung.
+- KL divergence là một mở rộng NMF phù hợp cho dữ liệu không âm và có tính phân phối.
+- Multiplicative Update là solver đúng khi dùng KL divergence trong sklearn.
+- L1 regularization trên W/H đúng mục tiêu tạo sparsity.
+- Local NMF đúng bản chất extractive summarization cho văn bản ngắn.
+- Chọn k bằng masked imputation thực tế hơn heuristic cứng.
+- Chọn câu bằng MMR chuẩn đúng mục tiêu cân bằng giữa relevance và chống trùng lặp.
 
-### Gioi han con lai
+### Giới hạn còn lại
 
-- TF-IDF + KL la cach lam thuc dung, nhung neu muon theo xac suat chat hon co the thu count matrix hoac normalized term-frequency.
-- `alpha_W=0.1` va `alpha_H=0.1` la tham so khoi dau hop ly, chua phai ket qua tuning tren dataset lon.
-- Diem summary can benchmark bang ROUGE/BERTScore tren tap test de ket luan chat luong khach quan.
-- Mo phong W/H trong frontend phu hop giai thich thuat toan, con sklearn NMF moi la solver chinh cho tom tat.
+- TF-IDF + KL là cách làm thực dụng, nhưng nếu muốn theo xác suất chặt hơn có thể thử count matrix hoặc normalized term-frequency.
+- `alpha_W=0.1` và `alpha_H=0.1` là tham số khởi đầu hợp lý, chưa phải kết quả tuning trên dataset lớn.
+- Điểm summary cần benchmark bằng ROUGE/BERTScore trên tập test để kết luận chất lượng khách quan.
+- Mô phỏng W/H trong frontend phù hợp để giải thích thuật toán; sklearn NMF mới là solver chính cho tóm tắt.
 
-## 12. Tom lai
+## 12. Tóm lại
 
-Project da chuyen tu mo hinh global NMF sang local KL-NMF co L1 sparsity. Day la thay doi quan trong ve ban chat: he thong khong con dung topic/vocabulary cua corpus cu de tom tat van ban moi, ma hoc topic truc tiep tu chinh doan van nguoi dung nhap. Ket qua ky vong la topic sat noi dung hon, tu khoa gon hon, cach chon k minh bach hon va summary it trung lap hon.
+Project đã chuyển từ mô hình global NMF sang local KL-NMF có L1 sparsity và chọn câu bằng MMR chuẩn. Đây là thay đổi quan trọng về bản chất: hệ thống không còn dùng topic/vocabulary của corpus cũ để tóm tắt văn bản mới, mà học topic trực tiếp từ chính đoạn văn người dùng nhập. Kết quả kỳ vọng là topic sát nội dung hơn, từ khóa gọn hơn, cách chọn k minh bạch hơn và summary ít trùng lặp hơn nhờ công thức `λ * relevance - (1 - λ) * redundancy`.

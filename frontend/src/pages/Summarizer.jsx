@@ -15,11 +15,7 @@ export default function Summarizer() {
   const [text, setText] = useState(toy.text);
   const [k, setK] = useState('');
   const [sentenceCount, setSentenceCount] = useState(3);
-  const [alpha, setAlpha] = useState(1);
-  const [beta, setBeta] = useState(1);
-  const [gamma, setGamma] = useState(0.5);
-  const [positionWeight, setPositionWeight] = useState(0.15);
-  const [lengthWeight, setLengthWeight] = useState(0.1);
+  const [mmrLambda, setMmrLambda] = useState(0.7);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -37,17 +33,16 @@ export default function Summarizer() {
     setError('');
     setResult(null);
     setCopied(false);
-    if (!text.trim()) { setError('Hãy nhập văn bản cần tóm tắt.'); return; }
+    if (!text.trim()) {
+      setError('Hãy nhập văn bản cần tóm tắt.');
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
         text,
         summary_sentences: Number(sentenceCount),
-        alpha: Number(alpha),
-        beta: Number(beta),
-        gamma: Number(gamma),
-        position_weight: Number(positionWeight),
-        length_weight: Number(lengthWeight),
+        mmr_lambda: Number(mmrLambda),
       };
       if (k !== '') payload.k = Number(k);
       const data = await summarize(payload);
@@ -74,7 +69,7 @@ export default function Summarizer() {
         <div>
           <div className="section-kicker">02 / TÓM TẮT TRÍCH XUẤT</div>
           <h2 id="summarizer-heading">Giữ lại điều quan trọng</h2>
-          <p>Fit TF-IDF cục bộ, chọn k bằng masked KL imputation, rồi chọn câu theo salience, coverage và redundancy.</p>
+          <p>Fit TF-IDF cục bộ, chọn k bằng masked KL imputation, rồi chọn câu bằng Maximum Marginal Relevance.</p>
         </div>
         <span className="section-index">02</span>
       </div>
@@ -90,32 +85,29 @@ export default function Summarizer() {
             <label className="field-group">Số câu tóm tắt<input type="number" min="1" value={sentenceCount} onChange={(event) => updateField(setSentenceCount, event.target.value)} required /></label>
           </div>
           <details className="advanced-settings">
-            <summary>Trọng số chọn câu <span>↘</span></summary>
-            <div className="form-row three-cols">
-              <label className="field-group">Salience α<input type="number" min="0" step="0.1" value={alpha} onChange={(event) => updateField(setAlpha, event.target.value)} required /></label>
-              <label className="field-group">Coverage β<input type="number" min="0" step="0.1" value={beta} onChange={(event) => updateField(setBeta, event.target.value)} required /></label>
-              <label className="field-group">Redundancy γ<input type="number" min="0" step="0.1" value={gamma} onChange={(event) => updateField(setGamma, event.target.value)} required /></label>
-              <label className="field-group">Vị trí<input type="number" min="0" step="0.05" value={positionWeight} onChange={(event) => updateField(setPositionWeight, event.target.value)} required /></label>
-              <label className="field-group">Độ dài<input type="number" min="0" step="0.05" value={lengthWeight} onChange={(event) => updateField(setLengthWeight, event.target.value)} required /></label>
+            <summary>Tham số MMR <span>λ</span></summary>
+            <div className="form-row two-cols">
+              <label className="field-group">MMR λ<input type="number" min="0" max="1" step="0.05" value={mmrLambda} onChange={(event) => updateField(setMmrLambda, event.target.value)} required /></label>
             </div>
+            <div className="field-hint"><span>λ gần 1 ưu tiên độ liên quan; λ gần 0 phạt trùng lặp mạnh hơn.</span></div>
           </details>
           {error && <div className="alert alert-error" role="alert">{error}</div>}
           <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Đang phân tích...' : 'Tạo bản tóm tắt'}<span aria-hidden="true">→</span></button>
         </form>
 
         <div className="panel insight-panel summarize-insight">
-          <div className="panel-top"><span className="panel-label">QUY TRÌNH</span><span className="panel-meta">KL + L1</span></div>
+          <div className="panel-top"><span className="panel-label">QUY TRÌNH</span><span className="panel-meta">KL + L1 + MMR</span></div>
           <div className="process-list">
             <div><span>01</span><p><strong>Tách câu gốc</strong><small>Mỗi câu là một document, vẫn giữ nguyên câu để trích xuất.</small></p></div>
             <div><span>02</span><p><strong>Chọn k</strong><small>Mask một phần TF-IDF dương, fit NMF và chọn k impute tốt nhất.</small></p></div>
             <div><span>03</span><p><strong>NMF KL + L1</strong><small>MU solver, alpha W/H = 0.1, l1 ratio = 1.0.</small></p></div>
-            <div><span>04</span><p><strong>Chọn câu greedy</strong><small>Cân bằng salience, coverage, chống lặp và thứ tự gốc.</small></p></div>
+            <div><span>04</span><p><strong>MMR chuẩn</strong><small>Điểm = λ × relevance − (1 − λ) × redundancy.</small></p></div>
           </div>
           <div className="insight-foot">KHÔNG VIẾT LẠI · KHÔNG DÙNG MODEL GLOBAL</div>
         </div>
       </div>
 
-      {!result && !loading && <div className="empty-state"><span className="empty-symbol">≋</span><strong>Bản tóm tắt sẽ xuất hiện ở đây</strong><p>Nhập văn bản và chọn số câu để xem NMF chọn những câu nào.</p></div>}
+      {!result && !loading && <div className="empty-state"><span className="empty-symbol">▦</span><strong>Bản tóm tắt sẽ xuất hiện ở đây</strong><p>Nhập văn bản và chọn số câu để xem NMF + MMR chọn những câu nào.</p></div>}
       {loading && <div className="empty-state" role="status"><span className="loading-spinner" /><strong>Đang xác định các chủ đề...</strong></div>}
       {result && (
         <div className="result-stack">
@@ -125,6 +117,7 @@ export default function Summarizer() {
               <span>{result.sentence_analysis.length} câu nguồn</span>
               <span>k = {result.k}</span>
               <span>{methodLabel(result)}</span>
+              <span>MMR λ = {Number(result.mmr_lambda ?? mmrLambda).toFixed(2)}</span>
               <span>{result.solver?.toUpperCase()} solver</span>
             </div>
           </div>
@@ -137,8 +130,8 @@ export default function Summarizer() {
           </div>
           {result.topics.length > 0 && <div className="topic-section"><div className="subheading"><span className="panel-label">TỪ KHÓA THEO CHỦ ĐỀ</span><small>Top 5 từ từ ma trận H cục bộ</small></div><div className="topic-grid">{result.topics.map((topic, index) => <div className="panel topic-card" key={index}><div className="topic-label"><span>CHỦ ĐỀ</span><strong>{String(index + 1).padStart(2, '0')}</strong></div><div className="term-list">{topic.top_terms.map((term) => <span key={term}>{term.replaceAll('_', ' ')}</span>)}</div></div>)}</div></div>}
           <div className="sentence-section">
-            <div className="subheading"><span className="panel-label">PHÂN TÍCH TỪNG CÂU</span><small>Điểm lấy tại lúc xét/chọn trong greedy selection</small></div>
-            <div className="sentence-list">{result.sentence_analysis.map((item) => <article className={`panel sentence-card ${item.selected ? 'selected' : ''}`} key={item.index}><div className="sentence-card-head"><span className="sentence-no">CÂU {String(item.index + 1).padStart(2, '0')}</span><span className={`sentence-status ${item.selected ? 'is-selected' : ''}`}>{item.selected ? 'ĐƯỢC CHỌN' : 'BỎ QUA'}</span></div><p>{item.text}</p><div className="score-list"><span>Chủ đề <strong>{item.dominant_topic === null ? '-' : item.dominant_topic + 1}</strong></span><span>Salience <strong>{number(item.relevance)}</strong></span><span>Coverage <strong>{number(item.coverage_gain)}</strong></span><span>Redundancy <strong>{number(item.redundancy)}</strong></span><span>Điểm <strong>{number(item.score)}</strong></span></div></article>)}</div>
+            <div className="subheading"><span className="panel-label">PHÂN TÍCH TỪNG CÂU</span><small>Điểm MMR tại lúc xét/chọn trong greedy selection</small></div>
+            <div className="sentence-list">{result.sentence_analysis.map((item) => <article className={`panel sentence-card ${item.selected ? 'selected' : ''}`} key={item.index}><div className="sentence-card-head"><span className="sentence-no">CÂU {String(item.index + 1).padStart(2, '0')}</span><span className={`sentence-status ${item.selected ? 'is-selected' : ''}`}>{item.selected ? 'ĐƯỢC CHỌN' : 'BỎ QUA'}</span></div><p>{item.text}</p><div className="score-list"><span>Chủ đề <strong>{item.dominant_topic === null ? '-' : item.dominant_topic + 1}</strong></span><span>Relevance <strong>{number(item.relevance)}</strong></span><span>Redundancy <strong>{number(item.redundancy)}</strong></span><span>MMR <strong>{number(item.score)}</strong></span></div></article>)}</div>
           </div>
         </div>
       )}

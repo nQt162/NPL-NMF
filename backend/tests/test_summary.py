@@ -32,8 +32,11 @@ def test_summary_preserves_original_sentences_and_budget() -> None:
     assert result["k"] == 2
     assert result["loss_name"] == SPARSE_KL_LOSS_NAME
     assert result["solver"] == SPARSE_KL_SOLVER
+    assert result["selection_method"] == "maximum_marginal_relevance"
+    assert result["mmr_lambda"] == 0.7
     assert len(result["topics"]) == 2
     assert sum(row["selected"] for row in result["sentence_analysis"]) == 3
+    assert all("relevance" in row and "redundancy" in row for row in result["sentence_analysis"])
 
 
 def test_fallback_and_lead_n() -> None:
@@ -55,6 +58,13 @@ def test_summary_auto_k_uses_local_sentence_count() -> None:
     assert result["k_candidates"]
     assert len(result["topics"]) == result["k"]
     assert len(result["selected_indices"]) == 2
+
+
+def test_summary_accepts_standard_mmr_lambda() -> None:
+    result = summarize(TEXT, k=2, summary_sentences=2, mmr_lambda=0.35)
+    assert result["selection_method"] == "maximum_marginal_relevance"
+    assert result["mmr_lambda"] == 0.35
+    assert all("coverage_gain" not in row for row in result["sentence_analysis"])
 
 
 def test_summary_uses_kl_mu_sparse_nmf(monkeypatch) -> None:

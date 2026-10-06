@@ -1,4 +1,4 @@
-"""Extract sentences with local, on-the-fly KL-NMF for one input text."""
+"""Extract sentences with local, on-the-fly KL-NMF and standard MMR."""
 
 from __future__ import annotations
 
@@ -27,23 +27,9 @@ SUMMARY_NGRAM_RANGE = (1, 2)
 SUMMARY_MAX_FEATURES = 800
 K_SELECTION_METHOD_AUTO = "masked_kl_imputation"
 K_SELECTION_METHOD_REQUESTED = "requested"
-
-
-def _position_prior(index: int, total: int) -> float:
-    if total <= 1:
-        return 1.0
-    return 1.0 / (1.0 + index)
-
-
-def _length_quality(processed_sentence: str, min_good: int = 8, max_good: int = 35) -> float:
-    token_count = len(processed_sentence.split())
-    if token_count <= 0:
-        return 0.0
-    if token_count < min_good:
-        return token_count / min_good
-    if token_count <= max_good:
-        return 1.0
-    return max(0.25, max_good / token_count)
+DEFAULT_MMR_LAMBDA = 0.7
+SELECTION_METHOD_MMR = "maximum_marginal_relevance"
+SELECTION_METHOD_FALLBACK = "lead_n_fallback"
 
 
 def _method_metadata() -> dict:
@@ -56,13 +42,22 @@ def _method_metadata() -> dict:
     }
 
 
-def _fallback(sentences: list[str], budget: int, reason: str, k: int = 0) -> dict:
+def _fallback(
+    sentences: list[str],
+    budget: int,
+    reason: str,
+    k: int = 0,
+    *,
+    mmr_lambda: float = DEFAULT_MMR_LAMBDA,
+) -> dict:
     summary, indices = lead_n(sentences, budget)
     return {
         "k": k,
         **_method_metadata(),
         "k_selection_method": "fallback",
         "k_candidates": [],
+        "selection_method": SELECTION_METHOD_FALLBACK,
+        "mmr_lambda": mmr_lambda,
         "summary": summary,
         "selected_indices": indices,
         "topics": [],
@@ -72,10 +67,7 @@ def _fallback(sentences: list[str], budget: int, reason: str, k: int = 0) -> dic
                 "text": sentence,
                 "selected": i in indices,
                 "relevance": 0.0,
-                "coverage_gain": 0.0,
                 "redundancy": 0.0,
-                "position_prior": 0.0,
-                "length_quality": 0.0,
                 "score": 0.0,
                 "dominant_topic": None,
             }
@@ -135,74 +127,80 @@ def _topic_terms(H: np.ndarray, terms: list[str], top_n: int = 5) -> list[dict]:
     ]
 
 
+def _topic_relevance(W: np.ndarray, V: np.ndarray) -> np.ndarray:
+    salience = W.sum(axis=0)
+    salience = salience / (salience.sum() + EPS)
+    W_normalized = W / (W.sum(axis=1, keepdims=True) + EPS)
+    relevance = W_normalized @ salience
+    max_relevance = float(np.max(relevance)) if len(relevance) else 0.0
+    if max_relevance > EPS:
+        return relevance / max_relevance
+
+    norms = np.linalg.norm(V, axis=1)
+    max_norm = float(np.max(norms)) if len(norms) else 0.0
+    if max_norm > EPS:
+        return norms / max_norm
+    return np.zeros(V.shape[0], dtype=float)
+
+
+def _max_similarity_to_selected(
+    V: np.ndarray,
+    norms: np.ndarray,
+    index: int,
+    selected: list[int],
+) -> float:
+    if not selected or norms[index] <= 0:
+        return 0.0
+    return max(
+        (
+            float(np.dot(V[index], V[j]) / (norms[index] * norms[j]))
+            for j in selected
+            if norms[j] > 0
+        ),
+        default=0.0,
+    )
+
+
 def _select_sentences(
     sentences: list[str],
-    processed: list[str],
     V: np.ndarray,
     W: np.ndarray,
     budget: int,
     *,
-    alpha: float,
-    beta: float,
-    gamma: float,
-    position_weight: float,
-    length_weight: float,
+    mmr_lambda: float,
 ) -> tuple[list[int], list[dict]]:
-    salience = W.sum(axis=0)
-    salience = salience / (salience.sum() + EPS)
+    """Select sentences with standard Maximum Marginal Relevance."""
     W_normalized = W / (W.sum(axis=1, keepdims=True) + EPS)
+    relevance_scores = _topic_relevance(W, V)
     selected: list[int] = []
-    coverage = np.zeros(W.shape[1], dtype=float)
     analysis: list[dict | None] = [None] * len(sentences)
     norms = np.linalg.norm(V, axis=1)
-    position_priors = [_position_prior(i, len(sentences)) for i in range(len(sentences))]
-    length_qualities = [_length_quality(sentence) for sentence in processed]
 
     for _ in range(budget):
-        candidates: list[tuple[float, int]] = []
+        candidates: list[tuple[float, float, int]] = []
         current_scores: dict[int, dict] = {}
         for i, sentence in enumerate(sentences):
             if i in selected:
                 continue
-            relevance = float(np.dot(W_normalized[i], salience))
-            coverage_gain = float(np.dot(np.maximum(W_normalized[i] - coverage, 0), salience))
-            redundancy = 0.0
-            if selected and norms[i] > 0:
-                redundancy = max(
-                    (
-                        float(np.dot(V[i], V[j]) / (norms[i] * norms[j]))
-                        for j in selected
-                        if norms[j] > 0
-                    ),
-                    default=0.0,
-                )
-            score = (
-                alpha * relevance
-                + beta * coverage_gain
-                + position_weight * position_priors[i]
-                + length_weight * length_qualities[i]
-                - gamma * redundancy
-            )
+            relevance = float(relevance_scores[i])
+            redundancy = _max_similarity_to_selected(V, norms, i, selected)
+            score = mmr_lambda * relevance - (1.0 - mmr_lambda) * redundancy
             current = {
                 "index": i,
                 "text": sentence,
                 "selected": False,
                 "relevance": relevance,
-                "coverage_gain": coverage_gain,
                 "redundancy": float(redundancy),
-                "position_prior": float(position_priors[i]),
-                "length_quality": float(length_qualities[i]),
                 "score": float(score),
                 "dominant_topic": int(np.argmax(W_normalized[i])),
             }
-            if analysis[i] is None:
-                analysis[i] = current
-            candidates.append((score, i))
+            analysis[i] = current
+            candidates.append((score, relevance, i))
             current_scores[i] = current
-        chosen = min(candidates, key=lambda item: (-item[0], item[1]))[1]
+
+        chosen = min(candidates, key=lambda item: (-item[0], -item[1], item[2]))[2]
         analysis[chosen] = {**current_scores[chosen], "selected": True}
         selected.append(chosen)
-        coverage = np.maximum(coverage, W_normalized[chosen])
 
     ordered = sorted(selected)
     selected_set = set(ordered)
@@ -218,27 +216,20 @@ def summarize(
     text: str,
     k: int | None = None,
     summary_sentences: int = 3,
-    alpha: float = 1.0,
-    beta: float = 1.0,
-    gamma: float = 0.5,
-    position_weight: float = 0.15,
-    length_weight: float = 0.1,
+    mmr_lambda: float = DEFAULT_MMR_LAMBDA,
     seed: int = 42,
 ) -> dict:
     """Summarize one text by fitting KL-NMF only on the input sentences."""
     if k is not None and (not isinstance(k, int) or k < 1):
-        raise ValueError("k phải là số nguyên dương")
+        raise ValueError("k must be a positive integer")
     if not isinstance(summary_sentences, int) or summary_sentences < 1:
-        raise ValueError("summary_sentences phải là số nguyên dương")
-    if not all(
-        np.isfinite(value) and value >= 0
-        for value in (alpha, beta, gamma, position_weight, length_weight)
-    ):
-        raise ValueError("Scoring weights must be finite and nonnegative")
+        raise ValueError("summary_sentences must be a positive integer")
+    if not np.isfinite(mmr_lambda) or not 0 <= mmr_lambda <= 1:
+        raise ValueError("mmr_lambda must be finite and between 0 and 1")
 
     sentences = split_sentences(text)
     if not sentences:
-        raise ValueError("Văn bản phải có ít nhất một câu")
+        raise ValueError("text must contain at least one sentence")
 
     budget = min(summary_sentences, len(sentences))
     processed = preprocess_sentences(sentences)
@@ -249,24 +240,31 @@ def summarize(
     )
     if len(terms) == 0 or not np.any(V):
         fallback_k = max(1, len(sentences) // 2) if k is None else k
-        return _fallback(sentences, budget, "TF-IDF không có từ hữu ích", fallback_k)
+        return _fallback(
+            sentences,
+            budget,
+            "TF-IDF has no useful terms",
+            fallback_k,
+            mmr_lambda=mmr_lambda,
+        )
 
     k_used, k_selection_method, k_candidates = _select_or_resolve_k(V, k, seed)
     if k_used < 1:
-        return _fallback(sentences, budget, "Không đủ câu hoặc từ để chạy NMF cục bộ", 0)
+        return _fallback(
+            sentences,
+            budget,
+            "Not enough sentences or terms for local NMF",
+            0,
+            mmr_lambda=mmr_lambda,
+        )
 
     W, H = _fit_local_kl_nmf(V, k_used, seed)
     ordered, analysis = _select_sentences(
         sentences,
-        processed,
         V,
         W,
         budget,
-        alpha=alpha,
-        beta=beta,
-        gamma=gamma,
-        position_weight=position_weight,
-        length_weight=length_weight,
+        mmr_lambda=mmr_lambda,
     )
 
     return {
@@ -274,6 +272,8 @@ def summarize(
         **_method_metadata(),
         "k_selection_method": k_selection_method,
         "k_candidates": k_candidates,
+        "selection_method": SELECTION_METHOD_MMR,
+        "mmr_lambda": mmr_lambda,
         "summary": " ".join(sentences[i] for i in ordered),
         "selected_indices": ordered,
         "topics": _topic_terms(H, terms),

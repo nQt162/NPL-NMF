@@ -55,7 +55,7 @@ export default function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-note"><span className="note-line" />Luồng tóm tắt dùng TF-IDF cục bộ, NMF KL divergence và L1 sparsity.</div>
+          <div className="sidebar-note"><span className="note-line" />Luồng tóm tắt dùng TF-IDF cục bộ, NMF KL divergence, L1 sparsity và MMR.</div>
           <div className={`server-status status-${serverStatus}`} aria-live="polite">
             <span className="status-indicator" />
             {serverStatus === 'online' ? 'Backend đang kết nối' : serverStatus === 'offline' ? 'Backend chưa kết nối' : 'Đang kiểm tra backend'}
@@ -72,7 +72,7 @@ export default function App() {
           <div className="hero-copy">
             <div className="eyebrow"><span className="eyebrow-line" />PHÂN TÍCH CHỦ ĐỀ BẰNG NMF</div>
             <h1>Từ văn bản đến <em>ý chính.</em></h1>
-            <p>Quan sát ma trận, chọn câu theo chủ đề và đo chất lượng tóm tắt với cấu hình NMF phù hợp văn bản thưa.</p>
+            <p>Quan sát ma trận, chọn câu bằng MMR và đo chất lượng tóm tắt với cấu hình NMF phù hợp văn bản thưa.</p>
           </div>
           <div className="hero-visual" aria-hidden="true">
             <div className="hero-grid"><span /><span /><span /><span /><span /><span /><span /><span /><span /></div>
