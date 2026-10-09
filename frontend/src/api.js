@@ -1,5 +1,3 @@
-import { parseMetricsCsv } from './metrics.js';
-
 const configuredBase = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '') || '';
 
 function errorMessage(detail, status) {
@@ -41,10 +39,6 @@ function post(path, body) {
 export const health = () => request('/health');
 export const simulate = (body) => post('/api/simulate', body);
 export const summarize = (body) => post('/api/summarize', body);
+export const compareGlobalLocal = (body) => post('/api/compare-global-local', body);
 export const evaluate = (body) => post('/api/evaluate', body);
-
-export async function loadBatchMetrics() {
-  const response = await fetch(`${import.meta.env.BASE_URL}experiment/metrics.csv`, { cache: 'no-store' });
-  if (!response.ok) throw new Error('Không đọc được results/metrics.csv. Hãy chạy lại thí nghiệm hoặc build frontend.');
-  return parseMetricsCsv(await response.text());
-}
+export const loadBatchMetrics = () => request('/api/experiment/metrics', { cache: 'no-store' });

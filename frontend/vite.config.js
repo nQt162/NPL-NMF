@@ -8,6 +8,7 @@ const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const frontendRoot = fileURLToPath(new URL('.', import.meta.url));
 const metricsPath = path.join(projectRoot, 'results', 'metrics.csv');
 const toyPath = path.join(projectRoot, 'data', 'demo', 'toy.json');
+const backendTarget = process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8001';
 
 // Dev always reads the newest batch results; a static build includes a snapshot.
 function resultsAsset() {
@@ -36,14 +37,14 @@ export default defineConfig({
   server: {
     fs: { allow: [frontendRoot, toyPath] },
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
-      '/health': 'http://127.0.0.1:8000',
+      '/api': backendTarget,
+      '/health': backendTarget,
     },
   },
   preview: {
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
-      '/health': 'http://127.0.0.1:8000',
+      '/api': backendTarget,
+      '/health': backendTarget,
     },
   },
 });

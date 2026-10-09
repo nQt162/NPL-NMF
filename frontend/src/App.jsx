@@ -3,11 +3,13 @@ import { health } from './api.js';
 import Visualizer from './pages/Visualizer.jsx';
 import Summarizer from './pages/Summarizer.jsx';
 import Evaluation from './pages/Evaluation.jsx';
+import Comparison from './pages/Comparison.jsx';
 
 const pages = [
   { id: 'visualizer', number: '01', label: 'Mô phỏng NMF', caption: 'KL loss & ma trận' },
   { id: 'summarizer', number: '02', label: 'Tóm tắt văn bản', caption: 'Chủ đề & câu trích' },
   { id: 'evaluation', number: '03', label: 'Đánh giá', caption: 'Đối chứng & ROUGE' },
+  { id: 'comparison', number: '04', label: 'So sánh NMF', caption: 'Global vs Local' },
 ];
 
 export default function App() {
@@ -55,7 +57,7 @@ export default function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-note"><span className="note-line" />Luồng tóm tắt dùng TF-IDF cục bộ, NMF KL divergence, L1 sparsity và MMR.</div>
+          <div className="sidebar-note"><span className="note-line" />Ba biến thể: Local KL+L1, NMFTS pairwise và SNMF đồ thị.</div>
           <div className={`server-status status-${serverStatus}`} aria-live="polite">
             <span className="status-indicator" />
             {serverStatus === 'online' ? 'Backend đang kết nối' : serverStatus === 'offline' ? 'Backend chưa kết nối' : 'Đang kiểm tra backend'}
@@ -72,12 +74,12 @@ export default function App() {
           <div className="hero-copy">
             <div className="eyebrow"><span className="eyebrow-line" />PHÂN TÍCH CHỦ ĐỀ BẰNG NMF</div>
             <h1>Từ văn bản đến <em>ý chính.</em></h1>
-            <p>Quan sát ma trận, chọn câu bằng MMR và đo chất lượng tóm tắt với cấu hình NMF phù hợp văn bản thưa.</p>
+            <p>Quan sát phân rã, chọn câu bằng các biến thể NMF và đo chất lượng trên dữ liệu có tóm tắt tham chiếu.</p>
           </div>
           <div className="hero-visual" aria-hidden="true">
             <div className="hero-grid"><span /><span /><span /><span /><span /><span /><span /><span /><span /></div>
-            <div className="hero-formula">V <span>≈</span> W x H</div>
-            <div className="hero-formula-note">SENTENCES x TERMS</div>
+            <div className="hero-formula">V <span>≈</span> W × H</div>
+            <div className="hero-formula-note">SENTENCES × TERMS</div>
           </div>
         </header>
 
@@ -85,6 +87,7 @@ export default function App() {
           {active === 'visualizer' && <Visualizer />}
           {active === 'summarizer' && <Summarizer />}
           {active === 'evaluation' && <Evaluation />}
+          {active === 'comparison' && <Comparison />}
         </div>
         <footer className="site-footer"><span>TOPICSUM / NPL-NMF</span><span>Giữ nguyên câu gốc · Không sinh văn bản bằng LLM</span></footer>
       </main>

@@ -5,7 +5,9 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from .core.compare import compare_global_local
 from .core.evaluate import rouge_f1
+from .core.experiment import load_batch_metrics
 from .core.nmf import (
     SPARSE_KL_ALPHA_H,
     SPARSE_KL_ALPHA_W,
@@ -20,6 +22,8 @@ from .core.sentences import split_sentences
 from .core.summarize import summarize
 from .core.vectorize import vectorize_sentences
 from .schemas import (
+    CompareRequest,
+    CompareResponse,
     EvaluateRequest,
     EvaluateResponse,
     SimulateRequest,
@@ -119,14 +123,36 @@ def summarize_api(request: SummarizeRequest) -> dict:
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/compare-global-local", response_model=CompareResponse)
+def compare_global_local_api(request: CompareRequest) -> dict:
+    try:
+        return compare_global_local(**request.model_dump())
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/evaluate", response_model=EvaluateResponse)
 def evaluate_api(request: EvaluateRequest) -> dict:
     try:
-        result = summarize(request.text, summary_sentences=request.summary_sentences)
+        result = summarize(**request.model_dump(exclude={"reference_summary"}))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {
         "summary": result["summary"],
+        "method": result["method"],
+        "objective": result["objective"],
+        "k": result["k"],
+        "selection_method": result["selection_method"],
+        "query_feedback_applied": result["query_feedback_applied"],
+        "query_feedback_reason": result["query_feedback_reason"],
+        "loss_value": result["loss_value"],
+        "data_loss": result["data_loss"],
+        "regularization_loss": result["regularization_loss"],
         "fallback_reason": result["fallback_reason"],
         **rouge_f1(request.reference_summary, result["summary"]),
     }
+
+
+@app.get("/api/experiment/metrics")
+def experiment_metrics_api() -> list[dict]:
+    return load_batch_metrics()

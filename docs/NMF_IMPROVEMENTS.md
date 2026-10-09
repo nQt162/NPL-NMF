@@ -1,373 +1,106 @@
-# Tổng hợp các cải tiến NMF
+# Tổng hợp cải tiến NMF / TopicSum
 
-Tài liệu này tổng hợp các thay đổi đã thực hiện cho project NMF/TopicSum, gồm: phần cũ hoạt động như thế nào, đã cải tiến ra sao, hiệu quả khác gì trước, và các file/đoạn code liên quan.
+Tài liệu này ghi lại luồng cũ, các thay đổi thuật toán và nơi triển khai trong project. Các phương pháp lấy ý tưởng từ paper được đánh dấu là **paper-inspired** khi biểu diễn hoặc thiết lập chưa tái hiện nguyên trạng nghiên cứu.
 
-## 1. Tổng quan trước và sau
+## Tóm tắt trước và sau
 
-| Hạng mục | Trước khi sửa | Sau khi sửa | Hiệu quả |
+| Hạng mục | Trước | Hiện tại | Tác động |
 | --- | --- | --- | --- |
-| Luồng tóm tắt | Dùng global NMF model từ `nmf_corpus.joblib` đã train sẵn trên corpus lớn | Fit NMF cục bộ trên chính văn bản người dùng nhập | Tóm tắt bám nội dung cục bộ, không bị lẫn từ vựng của corpus cũ |
-| Đơn vị tài liệu | Văn bản người dùng bị đưa vào model toàn cục | Mỗi câu trong văn bản là một document riêng | Phù hợp hơn với extractive summarization cho văn bản ngắn |
-| TF-IDF | Phụ thuộc vocabulary/model đã train từ trước | Tạo vectorizer mới và `fit_transform` trên các câu đầu vào | Loại bỏ lỗi out-of-vocabulary do vocabulary cũ |
-| Loss NMF | Frobenius/MSE mặc định hoặc objective cũ | KL divergence + L1 regularization | Phù hợp hơn với dữ liệu văn bản thưa, topic sắc nét hơn |
-| Solver | Mặc định của sklearn | `solver="mu"` | Đúng yêu cầu của sklearn khi dùng `beta_loss="kullback-leibler"` |
-| Sparsity | Không có L1 penalty rõ ràng | `alpha_W=0.1`, `alpha_H=0.1`, `l1_ratio=1.0` | Ép W và H thưa hơn, giảm từ khóa nhiễu và topic chồng chéo |
-| Chọn k | Heuristic/fixed k | Masked KL imputation nếu người dùng để trống k | Chọn k dựa trên khả năng tái tạo dữ liệu bị che, thực tế hơn heuristic cứng |
-| Chọn câu | Dễ phụ thuộc điểm đơn giản từ W | Maximum Marginal Relevance chuẩn: `λ * relevance - (1 - λ) * redundancy` | Giảm trùng lặp, vẫn ưu tiên câu liên quan nhất, giữ thứ tự gốc khi xuất summary |
-| Hiển thị frontend | Loss/k dễ gây hiểu nhầm với cấu hình cũ | Hiển thị KL + L1, KL data, L1 penalty, candidate k, topic/câu | Người dùng thấy rõ backend đang dùng objective mới |
+| Tóm tắt chính | Dựa vào vocabulary/topic của Global NMF train trên corpus cũ | Fit TF-IDF và NMF cục bộ trên câu trong văn bản đầu vào | Topic, từ khóa và câu trích gắn với văn bản hiện tại |
+| Loss mặc định | Frobenius/MSE trong một số luồng cũ | Local KL divergence + L1, solver MU | Hiển thị đúng objective đang dùng; có thể tách loss tái tạo và regularization |
+| Chọn k | Heuristic hoặc k cố định | Masked KL imputation khi không truyền k | Chọn k dựa trên khả năng khôi phục các phần tử TF-IDF bị che |
+| Chọn câu | Xếp hạng theo trọng số/topic đơn giản | MMR: cân bằng relevance và cosine redundancy | Hạn chế lặp ý, sau cùng khôi phục thứ tự câu gốc |
+| Phương pháp paper | Chưa có các nhánh quan hệ câu | Thêm NMFTS-inspired, SNMF graph và Query PRF | Có thể so sánh nhiều giả thuyết trên cùng pipeline |
+| Đánh giá | Chưa có dữ liệu benchmark dùng được | Có batch runner, validation tuning và API đọc kết quả | Chưa báo điểm cho đến khi có reference summary hợp pháp |
 
-## Cập nhật mới nhất: chuẩn hóa MMR
+## Luồng Local KL-NMF
 
-Sau lần sửa mới nhất, phần chọn câu tóm tắt đã được chuyển từ scoring mở rộng tự thiết kế sang Maximum Marginal Relevance chuẩn.
+Trong `backend/app/core/summarize.py`, luồng tóm tắt mặc định:
 
-Trước đó, hệ thống dùng công thức kết hợp nhiều thành phần:
+1. Tách văn bản thành câu và giữ chỉ số gốc.
+2. Tiền xử lý từng câu; fit TF-IDF cục bộ ngay trên các câu đó.
+3. Chọn k bằng masked KL imputation nếu người dùng không nhập k.
+4. Fit NMF mới với `init="nndsvda"`, `solver="mu"`, `beta_loss="kullback-leibler"`, L1 trên W/H.
+5. Tính mức liên quan từ phân phối topic; chọn câu bằng MMR.
+6. Ghép các câu theo thứ tự xuất hiện trong văn bản.
 
-```text
-score = alpha * relevance + beta * coverage_gain + position_weight * position_prior + length_weight * length_quality - gamma * redundancy
-```
+Cấu hình mặc định vẫn là `alpha_w=0.1`, `alpha_h=0.1`, `l1_ratio=1.0`, `max_iter=500`, `seed=42`. Alpha và L1 ratio hiện có thể thay đổi qua API/UI và được tune trên validation. Loss Local được tính thành KL data loss cộng regularization; hệ số regularization phản ánh cách scikit-learn scale alpha theo kích thước ma trận.
 
-Sau khi chuẩn hóa, hệ thống dùng đúng công thức MMR:
+## Các nhánh bổ sung theo paper
 
-```text
-MMR(s) = λ * relevance(s) - (1 - λ) * max_similarity(s, selected)
-```
+### NMFTS-inspired pairwise
 
-Ý nghĩa thay đổi:
+Nhánh này tối ưu reconstruction Frobenius cùng symmetric-KL penalty giữa các hàng W, có trọng số theo độ tương tự câu. Phần chọn câu tiếp tục dùng MMR sau phân rã. `pairwise_lambda` điều chỉnh độ mạnh của liên kết.
 
-- `relevance` được lấy từ topic distribution của NMF, thể hiện mức đại diện của câu với các chủ đề chính.
-- `redundancy` được tính bằng cosine similarity giữa câu ứng viên và các câu đã chọn.
-- `mmr_lambda` mặc định là `0.7`; giá trị này càng gần 1 thì càng ưu tiên câu liên quan, càng gần 0 thì càng phạt trùng lặp mạnh.
-- Các thành phần `coverage_gain`, `position_prior`, `length_quality`, `alpha`, `beta`, `gamma` không còn nằm trong công thức chọn câu chính.
-- Frontend đã đổi sang một control duy nhất là `MMR λ`, đồng thời hiển thị `Relevance`, `Redundancy` và `MMR score` cho từng câu.
+Đây là bản **paper-inspired**, không phải tuyên bố tái hiện đầy đủ paper Aghdam và cộng sự: đồ thị hiện được dựng từ TF-IDF cosine kNN, không phải toàn bộ semantic representation và protocol dữ liệu của paper.
 
-File đã cập nhật:
+### SNMF đồ thị câu
 
-- `backend/app/core/summarize.py`: triển khai MMR chuẩn trong `_select_sentences(...)`.
-- `backend/app/schemas.py`: thêm `mmr_lambda`, `selection_method`; bỏ các trường scoring cũ khỏi sentence analysis.
-- `frontend/src/pages/Summarizer.jsx`: đổi UI sang tham số `MMR λ`.
-- `backend/tests/test_summary.py` và `backend/tests/test_api.py`: thêm kiểm tra MMR.
+Nhánh này phân rã đồ thị tương tự câu theo dạng `A ≈ G Gᵀ`, gán câu vào cụm theo hệ số G rồi chọn đại diện từ các cụm. Ranking dùng độ tương tự nội cụm và centrality.
 
-## 2. Bỏ global model `nmf_corpus.joblib`
+Đây là bản **paper-inspired** theo hướng Wang và cộng sự. TF-IDF cosine kNN là thay thế thực dụng cho semantic-role/lexical semantic similarity của paper, nên chưa tương đương hoàn toàn về biểu diễn.
 
-### Vấn đề cũ
+### Query PRF
 
-Phiên bản cũ load một NMF model toàn cục từ file `nmf_corpus.joblib`. Model này đã học vocabulary và ma trận chủ đề từ corpus lớn, nên khi người dùng nhập văn bản ngắn, topic và từ khóa có thể đến từ corpus cũ thay vì từ chính đoạn văn hiện tại.
+Trên nhánh Local KL-NMF, hệ thống biến query thành vector theo vocabulary của chính văn bản, lấy tối đa ba câu pseudo-relevant, trộn centroid các câu đó với query rồi kết hợp query relevance và topic relevance trước MMR. Nếu query không có từ khớp vocabulary, API trả lý do và tiếp tục bằng Local KL-NMF + MMR thông thường.
 
-### Cải tiến đã làm
+Query PRF được đưa vào batch chỉ khi **mọi bài** trong split có trường `query`. Nhánh này lấy ý tưởng từ Park và An; dữ liệu/query protocol paper chưa được tái lập trong project.
 
-- Xóa luồng phụ thuộc vào `joblib.load()` và global corpus model trong flow tóm tắt.
-- Xóa file code wrapper global model `backend/app/core/corpus_model.py`.
-- Gỡ bỏ package-data liên quan đến `nmf_corpus.joblib` trong `backend/pyproject.toml`.
-- API tóm tắt gọi trực tiếp local summarizer.
+Chi tiết mapping với nghiên cứu và các giới hạn học thuật nằm tại [PAPER_METHODS_AND_EXPERIMENTS.md](PAPER_METHODS_AND_EXPERIMENTS.md).
 
-### Hiệu quả
+## Chọn k và diễn giải loss
 
-- Không còn dùng topic/vocabulary của 3260 bài báo cũ để tóm tắt văn bản mới.
-- Tránh lỗi lấy từ khóa ngoài ngữ cảnh.
-- Luồng tóm tắt đúng bản chất hơn: học chủ đề từ chính văn bản đầu vào.
+- K tự động hiện dùng masked KL imputation; đây là tiêu chí khôi phục TF-IDF bị che, không phải thước đo trực tiếp chất lượng tóm tắt.
+- Cùng chính sách chọn k được dùng cho Local KL, NMFTS và SNMF để so sánh có kiểm soát. Nó **không** tối ưu riêng objective của NMFTS/SNMF. Có thể truyền cùng k cố định để đối chiếu.
+- Local KL loss = KL reconstruction + L1 penalty.
+- NMFTS loss = Frobenius reconstruction + pairwise symmetric-KL penalty.
+- SNMF loss = symmetric similarity reconstruction.
+- Không so sánh trị số loss trực tiếp giữa các nhánh vì objective, thang đo và ma trận được phân rã khác nhau.
 
-### File liên quan
+## Benchmark và dữ liệu
 
-- `backend/app/core/corpus_model.py`: đã xóa.
-- `backend/pyproject.toml`: bỏ dòng đóng gói `nmf_corpus.joblib`.
-- `backend/app/main.py:114`: endpoint `/api/summarize` gọi hàm `summarize(...)`.
-- `backend/app/core/summarize.py:215`: hàm `summarize(...)` là luồng tóm tắt mới.
+`scripts/run_experiment.py` tạo so sánh trên cùng bài và cùng ngân sách câu cho Lead-N, Global NMF cũ, Local KL+L1+MMR, NMFTS pairwise, SNMF graph và Query PRF khi split có query đầy đủ. Lỗi từng lần chạy vào `report.json`; không biến lỗi thành ROUGE bằng 0.
 
-## 3. Local NMF on-the-fly cho tóm tắt
+`scripts/tune_params.py` tìm k, số câu, alpha W/H, L1 ratio, MMR lambda, pairwise lambda và query weight trên validation. Cấu hình chỉ được xếp hạng nếu chạy thành công trên toàn bộ bài validation. Không dùng test để tuning.
 
-### Vấn đề cũ
+Mỗi dòng JSONL cần có `id`, `article`, `reference_summary`; thêm `query` nếu đánh giá Query PRF. Tập dữ liệu cần chia theo **bài**, không chia câu của cùng bài sang nhiều split, và cần manifest ghi nguồn/quyền sử dụng.
 
-Global model không phản ánh các ý chính cục bộ của đoạn văn ngắn. Khi vocabulary của người dùng khác vocabulary corpus train, kết quả transform dễ lệch.
+Hiện `data/splits/train.jsonl`, `val.jsonl`, `test.jsonl` đang rỗng và `results/metrics.csv` chưa có kết quả. Vì vậy chưa có cơ sở kết luận phương pháp nào tốt hơn; không tạo điểm giả từ demo.
 
-### Cải tiến đã làm
+## Tác dụng và vị trí trên web của phần mới
 
-Luồng mới trong `backend/app/core/summarize.py`:
+| Phần mới | Tác dụng dự kiến trong thuật toán | Vị trí người dùng nhìn thấy trên web |
+| --- | --- | --- |
+| Chọn Local KL-NMF, NMFTS hoặc SNMF | Cho phép đổi giả thuyết phân rã/chọn câu trên cùng văn bản; không ép các objective khác nhau thành một cấu hình | Tab **02 / Tóm tắt văn bản** → form **Văn bản nguồn** → menu **Phương pháp**. Bên phải form, vùng **Phương pháp đang chọn** mô tả objective của nhánh hiện tại. |
+| NMFTS-inspired pairwise và `pairwise_lambda` | Phạt độ lệch phân phối topic giữa các câu có liên hệ trong đồ thị; MMR sau đó vẫn giảm câu trùng lặp. Kỳ vọng giữ các câu liên quan trong cùng mạch chủ đề hơn | Tab **02 / Tóm tắt văn bản** → chọn **NMFTS-inspired pairwise KL** → mở **Tham số thuật toán** để chỉnh Pairwise λ. Sau khi chạy, kết quả hiển thị loss tổng, reconstruction và pairwise penalty. |
+| SNMF đồ thị câu | Gom câu theo cấu trúc tương tự; lần lượt lấy câu đại diện từ các cụm để tăng độ phủ chủ đề | Tab **02 / Tóm tắt văn bản** → menu **Phương pháp** → **SNMF đồ thị câu**. Kết quả có từ khóa theo cụm và phần **Phân tích từng câu**. SNMF không dùng MMR; vùng phân tích hiển thị score/cụm của phương pháp này. |
+| Query PRF | Dùng query người dùng để ưu tiên câu phù hợp với ý định tìm kiếm; nếu query OOV/không khớp, hệ thống báo lý do và vẫn trả tóm tắt Local KL+MMR | Tab **02 / Tóm tắt văn bản** → khi chọn Local KL, nhập vào **Truy vấn (không bắt buộc)**; trọng số xuất hiện khi đã nhập query. Trong kết quả, thông tin pseudo-relevant được ghi dưới summary, và điểm Query xuất hiện trong từng câu nếu PRF được áp dụng. |
+| Điều chỉnh alpha W/H và L1 ratio | Có thể khảo sát độ thưa thay vì mặc định cố định; alpha W tác động độ thưa của phân phối câu-topic, alpha H tác động độ thưa từ-topic | Tab **02 / Tóm tắt văn bản** → mở **Tham số thuật toán** khi dùng Local KL-NMF. Giá trị mặc định vẫn là 0.1 / 0.1 / 1.0. |
+| Loss theo objective | Tránh nhầm loss KL+L1 với loss Frobenius hoặc loss graph; breakdown cho biết phần tái tạo và phần phạt | Tab **02 / Tóm tắt văn bản** → sau khi chạy, ngay dưới hàng kết quả/k/solver là panel **Objective / ...**. Local hiện KL + L1; NMFTS hiện Frobenius + pairwise symmetric-KL; SNMF hiện symmetric Frobenius. Các con số giữa objective khác nhau không so sánh trực tiếp được. |
+| Auto-k và candidate scores | Cho xem k nào được chọn và điểm masked imputation của các ứng viên; lưu ý đây là độ khôi phục TF-IDF, không phải điểm chất lượng summary | Tab **02 / Tóm tắt văn bản** → bỏ trống k, sau khi chạy xem panel **Ứng viên k**. Panel có chú thích chính sách k dùng chung, không tối ưu riêng objective NMFTS/SNMF. |
+| Benchmark nhiều phương pháp và validation tuning | So sánh cùng tập bài/ngân sách câu, tune trên validation; lỗi không bị ngụy trang thành điểm ROUGE 0 | Sau khi chạy `scripts/run_experiment.py`, mở tab **03 / Đánh giá** → vùng **Thí nghiệm batch**, bảng trung bình và phần xem kết quả từng bài → nhấn **Làm mới dữ liệu**. Tuning chạy bằng `scripts/tune_params.py`; best config và toàn bộ grid nằm trong `results/tuning/tuning.json`/`tuning.csv`, không có màn hình tune riêng. |
 
-1. Tách câu từ text đầu vào.
-2. Tiền xử lý từng câu.
-3. Tạo ma trận TF-IDF cục bộ trên chính danh sách câu.
-4. Chọn hoặc suy ra `k`.
-5. Fit NMF mới trên ma trận cục bộ.
-6. Lấy topic terms từ ma trận H mới.
-7. Chọn câu và ghép lại theo thứ tự gốc.
+Tab **04 / So sánh NMF** hiện vẫn dành cho đối chiếu Global NMF cũ với Local KL-NMF; các nhánh NMFTS/SNMF/PRF được chọn ở tab 02 và benchmark tại tab 03.
 
-### Hiệu quả
+**Hiệu quả đã đo và hiệu quả kỳ vọng:** các tác dụng trong bảng là mục tiêu thuật toán, chưa phải kết luận thực nghiệm. `data/splits/*.jsonl` và `results/metrics.csv` hiện rỗng, nên chưa có ROUGE/runtime để khẳng định nhánh nào tốt hơn. Cần bổ sung reference summary hợp pháp, tune trên validation và chỉ dùng test cho đánh giá cuối.
 
-- Topic và từ khóa đến từ văn bản hiện tại.
-- Tóm tắt hợp lý hơn với văn bản ngắn.
-- Không còn hiện tượng lấy từ khóa ngoài ngữ cảnh từ corpus cũ.
+## File chính
 
-### File liên quan
+- `backend/app/core/nmf.py`: objective KL/Frobenius, regularization và masked-imputation k selection.
+- `backend/app/core/vectorize.py`: TF-IDF cục bộ theo câu.
+- `backend/app/core/summarize.py`: Local KL-NMF, MMR, NMFTS-inspired, SNMF và Query PRF.
+- `backend/app/core/paper_methods.py`: đồ thị câu và updates cho NMFTS/SNMF.
+- `backend/app/schemas.py`, `backend/app/main.py`: API contracts, evaluate và batch metrics.
+- `scripts/run_experiment.py`: benchmark các baseline/phương pháp.
+- `scripts/tune_params.py`: tuning trên validation.
+- `frontend/src/pages/Summarizer.jsx`: chọn method, query và tham số; loss theo objective.
+- `frontend/src/pages/Evaluation.jsx`: ROUGE một mẫu và batch.
+- `frontend/src/api.js`: gọi endpoint metrics backend.
+- `docs/PAPER_METHODS_AND_EXPERIMENTS.md`: mapping paper, protocol chạy và hướng tiếp theo.
 
-- `backend/app/core/summarize.py:215`: hàm tổng `summarize(...)`.
-- `backend/app/core/summarize.py:251`: chọn hoặc resolve `k`.
-- `backend/app/core/summarize.py:263`: fit local KL-NMF.
-- `backend/app/core/summarize.py:264`: chọn câu bằng MMR chuẩn.
-- `backend/app/core/summarize.py:279`: ghép summary theo thứ tự câu gốc.
+## Việc nên làm tiếp
 
-## 4. Đổi objective sang KL divergence + L1 sparsity
-
-### Vấn đề cũ
-
-Frobenius/MSE xem sai số tái tạo như bình phương khoảng cách Euclidean. Với dữ liệu text sparse như TF-IDF, cách này thường tạo topic kém sắc nét hơn và dễ có từ khóa nhiễu.
-
-### Cải tiến đã làm
-
-Cấu hình NMF mới:
-
-```python
-NMF(
-    n_components=k,
-    init="nndsvda",
-    solver="mu",
-    beta_loss="kullback-leibler",
-    alpha_W=0.1,
-    alpha_H=0.1,
-    l1_ratio=1.0,
-    max_iter=500,
-    random_state=seed,
-)
-```
-
-### Hiệu quả
-
-- KL divergence phù hợp hơn với dữ liệu không âm, thưa và có tính phân phối như tần suất/TF-IDF.
-- `solver="mu"` là solver phù hợp khi dùng KL trong sklearn.
-- L1 trên W giúp mỗi câu tập trung vào ít chủ đề hơn.
-- L1 trên H giúp mỗi topic có bộ từ khóa đặc trưng hơn.
-- `max_iter=500` giúp MU solver có nhiều vòng lặp hơn để hội tụ.
-
-### File liên quan
-
-- `backend/app/core/nmf.py:14`: khai báo `SPARSE_KL_LOSS_NAME = "kullback-leibler"`.
-- `backend/app/core/nmf.py:15`: khai báo `SPARSE_KL_SOLVER = "mu"`.
-- `backend/app/core/nmf.py:16`: khai báo `SPARSE_KL_ALPHA_W = 0.1`.
-- `backend/app/core/nmf.py:17`: khai báo `SPARSE_KL_ALPHA_H = 0.1`.
-- `backend/app/core/nmf.py:18`: khai báo `SPARSE_KL_L1_RATIO = 1.0`.
-- `backend/app/core/nmf.py:19`: khai báo `SPARSE_KL_MAX_ITER = 500`.
-- `backend/app/core/summarize.py:109`: khởi tạo sklearn `NMF`.
-- `backend/app/core/summarize.py:112`: gán `solver=SPARSE_KL_SOLVER`.
-- `backend/app/core/summarize.py:113`: gán `beta_loss=SPARSE_KL_LOSS_NAME`.
-- `backend/app/core/summarize.py:114`: gán `alpha_W=SPARSE_KL_ALPHA_W`.
-- `backend/app/core/summarize.py:115`: gán `alpha_H=SPARSE_KL_ALPHA_H`.
-- `backend/app/core/summarize.py:116`: gán `l1_ratio=SPARSE_KL_L1_RATIO`.
-- `backend/app/core/summarize.py:117`: gán `max_iter=SPARSE_KL_MAX_ITER`.
-
-## 5. Loss mới trong mô phỏng NMF
-
-### Vấn đề cũ
-
-Frontend vẫn hiển thị loss cũ hoặc chỉ một số loss chung, làm người dùng tưởng backend chưa đổi objective.
-
-### Cải tiến đã làm
-
-- Backend trả về `loss_name`, `solver`, `alpha_W`, `alpha_H`, `l1_ratio`.
-- Snapshot trả thêm:
-  - `loss`: total loss.
-  - `data_loss`: phần KL data loss.
-  - `regularization_loss`: phần L1 penalty.
-- Frontend hiển thị rõ `KL + L1 loss`, `KL data`, `L1 penalty`.
-
-### Hiệu quả
-
-- Người dùng đọc đúng bản chất loss hiện tại.
-- Có thể tách được phần lỗi tái tạo dữ liệu và phần penalty điều chuẩn.
-- Giá trị loss là số thập phân bình thường, nhưng không nên so trực tiếp với Frobenius loss cũ vì objective đã khác.
-
-### File liên quan
-
-- `backend/app/core/nmf.py:44`: `Snapshot` có `data_loss` và `regularization_loss`.
-- `backend/app/core/nmf.py:76`: `objective_breakdown(...)` tính data loss và regularization.
-- `backend/app/main.py:89`: API trả `loss_name`.
-- `backend/app/main.py:90`: API trả `solver`.
-- `backend/app/main.py:91`: API trả `alpha_W`.
-- `backend/app/main.py:92`: API trả `alpha_H`.
-- `backend/app/main.py:93`: API trả `l1_ratio`.
-- `backend/app/main.py:104`: snapshot trả `data_loss`.
-- `backend/app/main.py:105`: snapshot trả `regularization_loss`.
-- `backend/app/schemas.py:25`: schema `SnapshotResponse`.
-- `frontend/src/pages/Visualizer.jsx:141`: hiển thị tên loss.
-- `frontend/src/pages/Visualizer.jsx:143`: block breakdown loss.
-- `frontend/src/pages/Visualizer.jsx:144`: hiển thị `KL data`.
-- `frontend/src/pages/Visualizer.jsx:145`: hiển thị `L1 penalty`.
-
-## 6. Cải tiến cách tự động tìm k
-
-### Vấn đề cũ
-
-Công thức `k = max(1, len(sentences) // 2)` đơn giản, dễ sai với văn bản có ít/nhiều chủ đề thật. Fixed k cũng không linh hoạt.
-
-### Cải tiến đã làm
-
-Nếu người dùng không nhập k:
-
-1. Lấy các ô TF-IDF dương.
-2. Che một phần các ô này làm validation.
-3. Fit NMF với nhiều ứng viên k.
-4. Tái tạo các ô bị che.
-5. Tính KL imputation error.
-6. Chọn k có điểm thấp nhất.
-
-### Hiệu quả
-
-- K được chọn dựa trên dữ liệu đầu vào, không chỉ dựa vào số câu.
-- Giảm nguy cơ chọn k quá lớn cho văn bản ngắn.
-- Giảm nguy cơ ép tất cả văn bản vào 1 topic khi có nhiều cụm ý rõ.
-
-### File liên quan
-
-- `backend/app/core/nmf.py:20`: `K_SELECTION_MAX_K = 6`.
-- `backend/app/core/nmf.py:21`: `K_SELECTION_TRIALS = 3`.
-- `backend/app/core/nmf.py:22`: `K_SELECTION_VALIDATION_FRACTION = 0.2`.
-- `backend/app/core/nmf.py:305`: hàm `select_k_by_imputation(...)`.
-- `backend/app/core/nmf.py:326`: giới hạn ứng viên k.
-- `backend/app/core/nmf.py:327`: đặt lower bound k cho văn bản có đủ dữ liệu.
-- `backend/app/core/nmf.py:341`: tạo danh sách ứng viên k.
-- `backend/app/core/nmf.py:359`: tính KL error trên phần bị che.
-- `backend/app/core/nmf.py:368`: sắp xếp và chọn k tốt nhất.
-- `backend/app/core/summarize.py:85`: tóm tắt gọi `select_k_by_imputation(...)`.
-- `backend/app/main.py:61`: simulate gọi `select_k_by_imputation(...)`.
-- `frontend/src/pages/Visualizer.jsx:156`: hiển thị các candidate k.
-- `frontend/src/pages/Summarizer.jsx:125`: hiển thị các candidate k trong trang tóm tắt.
-
-## 7. Cải tiến cách chọn câu tóm tắt bằng MMR chuẩn
-
-### Vấn đề cũ
-
-Nếu chỉ lấy câu có tổng trọng số W cao nhất, summary có thể bị trùng lặp ý vì các câu cùng nói về một nội dung vẫn đều có điểm cao.
-
-### Cải tiến đã làm
-
-Hàm chọn câu mới dùng Maximum Marginal Relevance chuẩn:
-
-```text
-MMR(s) = λ * relevance(s) - (1 - λ) * max_similarity(s, selected)
-```
-
-Trong đó:
-
-- `relevance`: độ liên quan của câu với các topic chính từ NMF.
-- `redundancy`: cosine similarity lớn nhất giữa câu ứng viên và các câu đã chọn.
-- `mmr_lambda`: tham số cân bằng giữa liên quan và chống trùng lặp, mặc định `0.7`.
-
-Sau khi chọn xong, các câu được sắp xếp lại theo index gốc trước khi ghép summary.
-
-### Hiệu quả
-
-- Summary bớt lặp ý nhờ hình phạt redundancy chuẩn MMR.
-- Vẫn ưu tiên câu đại diện tốt cho chủ đề chính nhờ relevance từ ma trận W.
-- Văn bản tóm tắt đọc trôi chảy hơn vì giữ thứ tự xuất hiện ban đầu.
-
-### File liên quan
-
-- `backend/app/core/summarize.py:130`: hàm `_topic_relevance(...)` tính relevance từ NMF.
-- `backend/app/core/summarize.py:146`: hàm `_max_similarity_to_selected(...)` tính redundancy.
-- `backend/app/core/summarize.py:164`: hàm `_select_sentences(...)`.
-- `backend/app/core/summarize.py:187`: công thức MMR chuẩn.
-- `backend/app/core/summarize.py:199`: chọn câu có MMR score cao nhất.
-- `backend/app/core/summarize.py:202`: sắp xếp câu đã chọn theo thứ tự gốc.
-- `backend/app/core/summarize.py:279`: ghép summary từ các câu theo thứ tự gốc.
-
-## 8. Mở rộng API contract
-
-### Cải tiến đã làm
-
-Schema API được mở rộng để frontend/doc/debug biết rõ backend đang dùng cấu hình nào:
-
-- `k`.
-- `loss_name`.
-- `solver`.
-- `alpha_W`.
-- `alpha_H`.
-- `l1_ratio`.
-- `k_selection_method`.
-- `k_candidates`.
-- `selection_method`.
-- `mmr_lambda`.
-- `data_loss`.
-- `regularization_loss`.
-
-### Hiệu quả
-
-- Frontend không cần đoán cấu hình backend.
-- Dễ debug khi thấy loss/k khác kỳ vọng.
-- Phù hợp hơn với yêu cầu giải thích quá trình NMF.
-
-### File liên quan
-
-- `backend/app/schemas.py:25`: `SnapshotResponse`.
-- `backend/app/schemas.py:36`: `KCandidateResponse`.
-- `backend/app/schemas.py:40`: `SimulateResponse`.
-- `backend/app/schemas.py:82`: `SummarizeResponse`.
-- `backend/app/main.py:88`: response `/api/simulate`.
-- `backend/app/core/summarize.py:272`: response `/api/summarize`.
-
-## 9. Cải tiến frontend
-
-### Cải tiến đã làm
-
-- Trang mô phỏng ghi rõ NMF đang dùng KL + L1.
-- Trang tóm tắt để trống k mặc định để backend tự chọn.
-- Trang tóm tắt có tham số `MMR λ` để cân bằng relevance và redundancy.
-- Hiển thị candidate k và điểm từng candidate.
-- Hiển thị topic terms từ H cục bộ.
-- Hiển thị phân tích từng câu: topic chính, relevance, redundancy và MMR score.
-- Hiển thị loss breakdown thay vì chỉ một số loss chung.
-
-### Hiệu quả
-
-- Giao diện trung thực hơn với backend mới.
-- Người dùng nhìn được vì sao hệ thống chọn k và chọn câu.
-- Tốt hơn cho demo, báo cáo và giải thích thuật toán.
-
-### File liên quan
-
-- `frontend/src/App.jsx:58`: mô tả luồng TF-IDF cục bộ, KL divergence và L1 sparsity.
-- `frontend/src/pages/Visualizer.jsx:91`: mô tả masked imputation và KL/L1.
-- `frontend/src/pages/Visualizer.jsx:141`: hiển thị loss.
-- `frontend/src/pages/Visualizer.jsx:143`: hiển thị breakdown.
-- `frontend/src/pages/Visualizer.jsx:156`: hiển thị candidate k.
-- `frontend/src/pages/Summarizer.jsx:45`: gửi `mmr_lambda` lên backend.
-- `frontend/src/pages/Summarizer.jsx:88`: input tham số `MMR λ`.
-- `frontend/src/pages/Summarizer.jsx:120`: hiển thị `MMR λ` trong kết quả.
-- `frontend/src/pages/Summarizer.jsx:134`: hiển thị relevance, redundancy và MMR score.
-- `frontend/src/styles.css:139`: style loss breakdown.
-- `frontend/src/styles.css:150`: style candidate k.
-
-## 10. Kiểm thử đã chạy
-
-Đã chạy các kiểm thử chính:
-
-```powershell
-backend\.venv\Scripts\python.exe -m pytest backend\tests
-npm run build
-npm test
-```
-
-Kết quả:
-
-- Backend tests: 14 passed.
-- Frontend tests: 2 passed.
-- Frontend build: thành công.
-
-## 11. Đánh giá mức độ đúng với paper và thực tế
-
-### Điểm đúng hướng
-
-- KL divergence là một mở rộng NMF phù hợp cho dữ liệu không âm và có tính phân phối.
-- Multiplicative Update là solver đúng khi dùng KL divergence trong sklearn.
-- L1 regularization trên W/H đúng mục tiêu tạo sparsity.
-- Local NMF đúng bản chất extractive summarization cho văn bản ngắn.
-- Chọn k bằng masked imputation thực tế hơn heuristic cứng.
-- Chọn câu bằng MMR chuẩn đúng mục tiêu cân bằng giữa relevance và chống trùng lặp.
-
-### Giới hạn còn lại
-
-- TF-IDF + KL là cách làm thực dụng, nhưng nếu muốn theo xác suất chặt hơn có thể thử count matrix hoặc normalized term-frequency.
-- `alpha_W=0.1` và `alpha_H=0.1` là tham số khởi đầu hợp lý, chưa phải kết quả tuning trên dataset lớn.
-- Điểm summary cần benchmark bằng ROUGE/BERTScore trên tập test để kết luận chất lượng khách quan.
-- Mô phỏng W/H trong frontend phù hợp để giải thích thuật toán; sklearn NMF mới là solver chính cho tóm tắt.
-
-## 12. Tóm lại
-
-Project đã chuyển từ mô hình global NMF sang local KL-NMF có L1 sparsity và chọn câu bằng MMR chuẩn. Đây là thay đổi quan trọng về bản chất: hệ thống không còn dùng topic/vocabulary của corpus cũ để tóm tắt văn bản mới, mà học topic trực tiếp từ chính đoạn văn người dùng nhập. Kết quả kỳ vọng là topic sát nội dung hơn, từ khóa gọn hơn, cách chọn k minh bạch hơn và summary ít trùng lặp hơn nhờ công thức `λ * relevance - (1 - λ) * redundancy`.
+1. Chuẩn bị dữ liệu tham chiếu tiếng Việt có quyền sử dụng; chạy validation tuning rồi đánh giá test một lần.
+2. Báo cáo ROUGE-1/2/L cùng runtime, số câu và tỷ lệ fallback; bổ sung BERTScore hoặc đánh giá người đọc khi có nguồn lực.
+3. Chạy ablation tách riêng KL/Frobenius, L1, pairwise penalty, MMR và Query PRF; giữ nguyên split, ngân sách câu và seed.
+4. Nếu mục tiêu là tái hiện paper, triển khai đúng semantic similarity/role representation, tiền xử lý, dataset và siêu tham số gốc trước khi so sánh.
