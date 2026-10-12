@@ -1,355 +1,1179 @@
-# Cẩm nang NMF và hệ thống TopicSum
+# Cẩm nang dễ hiểu về NMF và hệ thống TopicSum
 
-> Tài liệu nền để đọc hiểu thuật toán, luồng xử lý, các trang web, cách đánh giá và giới hạn hiện tại của dự án. Nội dung mô tả code trong repository tại ngày 12-10-2026; khi code đổi, cần đối chiếu lại các file được dẫn.
+> Cập nhật theo code và các ví dụ chạy ngày **12-10-2026**. Đây là tài liệu để học, đọc hiểu hệ thống và chuẩn bị báo cáo. Các số liệu có ghi **ví dụ tính tay** là số đơn giản hóa để giải thích công thức; các số liệu có ghi **chạy thật** được lấy từ code dự án. Ví dụ một bài không phải kết quả benchmark trên corpus.
 
-## 1. Tóm tắt nhanh
+## Cách đọc tài liệu này
 
-TopicSum là ứng dụng **tóm tắt trích xuất tiếng Việt**. Hệ thống giữ nguyên câu trong văn bản gốc, dùng TF-IDF và NMF để biểu diễn câu theo các chủ đề tiềm ẩn, rồi dùng MMR để chọn một số câu ít trùng lặp hơn. Đây không phải hệ thống sinh văn bản mới bằng LLM.
+Bạn không cần biết hết đại số tuyến tính để đọc phần đầu. Hãy đi theo thứ tự: văn bản → số hóa câu → tìm chủ đề → chọn câu → đánh giá bản tóm tắt. Bấm vào số chương trong bảng để đi đến phần cần đọc.
 
-Luồng tóm tắt chính là **Local NMF**: mỗi bài người dùng gửi được xem như một tập tài liệu nhỏ, trong đó mỗi câu là một document. TF-IDF và NMF được fit lại trên chính bài đó. File `nmf_corpus.joblib` không được dùng trong API tóm tắt hiện tại; nó còn được gọi bởi benchmark ngoại tuyến để làm baseline Global NMF.
+| Bạn muốn hiểu gì? | Phần nên đọc |
+| --- | --- |
+| Hệ thống nhận gì, trả gì? | [1-3](#chuong-1) |
+| TF-IDF, V, W và H là gì? | [4-7](#chuong-4) |
+| Loss, KL, Frobenius và L1 hoạt động ra sao? | [8-11](#chuong-8) |
+| Vì sao chọn k, tính điểm và giữ câu này? | [12-16](#chuong-12) |
+| Một lần chạy thật cho kết quả gì? | [17](#chuong-17) |
+| ROUGE và ablation được đọc thế nào? | [18-20](#chuong-18) |
+| Đâu là giới hạn, đâu là điều có thể báo cáo? | [21-24](#chuong-21) |
 
-Ứng dụng có bốn trang:
+Các công thức viết trong khối `text` để đọc được ngay trong Markdown. Ký hiệu `≈` nghĩa là xấp xỉ; `@` hoặc phép viết `WH` là nhân ma trận; `*` trong công thức cập nhật từng phần tử được giải thích riêng.
 
-1. **Mô phỏng NMF**: xem `V`, `W`, `H`, `WH` và loss qua các vòng MU tự cài đặt.
-2. **Tóm tắt văn bản**: chạy hai biến thể Local KL-NMF + L1 + MMR hoặc Local Frobenius-NMF + L1 + MMR.
-3. **Đánh giá**: tạo cả hai bản tóm tắt trên cùng cấu hình, rồi so từng bản với cùng reference bằng ROUGE.
-4. **Ablation L1**: so sánh KL không L1, L1 trên W, L1 trên H, và L1 trên cả hai.
+<a id="chuong-1"></a>
 
-**Trạng thái dữ liệu cần nói rõ trong báo cáo:** `data/splits/train.jsonl`, `val.jsonl`, `test.jsonl` và `data/raw/articles.jsonl` hiện rỗng; `results/metrics.csv` cũng chưa có benchmark hợp lệ. Vì vậy chưa thể kết luận định lượng rằng KL tốt hơn Frobenius, L1 nâng ROUGE, hay một cấu hình k/alpha là tối ưu trên tập dữ liệu tổng quát.
+## 1. Hệ thống đang làm bài toán gì?
 
-## 2. Bài toán và phạm vi
+TopicSum nhận một văn bản tiếng Việt, chọn một số **câu nguyên văn** và ghép chúng theo thứ tự xuất hiện để tạo bản tóm tắt. Đây là tóm tắt **trích xuất**.
 
-### Tóm tắt trích xuất và tóm tắt trừu tượng
+Ví dụ, nguồn có 6 câu và bạn yêu cầu giữ 3 câu. Hệ thống phải quyết định nên giữ những câu nào để vừa có thông tin quan trọng, vừa tránh chọn các câu gần trùng nhau.
 
-- **Trích xuất (extractive)**: chọn câu có sẵn trong nguồn, không viết lại. Ưu điểm là bảo toàn cách diễn đạt và số liệu gốc; nhược điểm là câu được chọn có thể thiếu mạch nối, đại từ tham chiếu hoặc ngữ cảnh.
-- **Trừu tượng (abstractive)**: diễn đạt lại nội dung bằng câu mới. Có thể gọn và tự nhiên hơn, nhưng có rủi ro thay đổi hoặc bịa thông tin.
+NMF giúp tạo biểu diễn câu-chủ đề. MMR dùng biểu diễn đó và độ tương tự giữa các câu để quyết định câu được giữ. ROUGE được dùng sau đó khi có một bản tóm tắt tham chiếu.
 
-TopicSum làm dạng trích xuất. Nếu kết quả chưa mạch lạc, nguyên nhân có thể là câu nguồn phụ thuộc ngữ cảnh, không nhất thiết là NMF phân rã sai.
+Ba công việc này dùng ba loại điểm khác nhau:
 
-### Bài toán mỗi lần chạy
-
-Cho văn bản có `n` câu và một ngân sách tóm tắt `B`, mục tiêu là chọn tối đa `min(B,n)` câu, sắp theo thứ tự gốc. `B` là số câu đầu ra; `k` là số thành phần/chủ đề của NMF. Hai tham số này khác nhau và không có công thức bắt buộc `k = B`.
-
-## 3. NMF: ý tưởng và ký hiệu
-
-NMF tìm hai ma trận không âm để xấp xỉ một ma trận không âm:
-
-```text
-V ≈ W H,       V >= 0, W >= 0, H >= 0
-```
-
-Trong TopicSum, `V` có chiều **câu × từ/ngữ**:
-
-| Ma trận | Kích thước | Cách đọc trong dự án |
+| Đại lượng | Nó trả lời câu hỏi nào? | Tính từ đâu? |
 | --- | --- | --- |
-| `V` | `n_sentences × n_terms` | Mỗi hàng là một câu; mỗi cột là một unigram/bigram TF-IDF. |
-| `W` | `n_sentences × k` | Hàng `i` biểu diễn mức tham gia của câu `i` vào `k` chủ đề. |
-| `H` | `k × n_terms` | Hàng `t` biểu diễn trọng số từ/ngữ trong chủ đề `t`. |
-| `WH` | `n_sentences × n_terms` | Ma trận TF-IDF được mô hình tái tạo. |
+| Loss/objective NMF | Các ma trận W/H tái tạo dữ liệu đầu vào tốt đến đâu, với penalty đang chọn? | V và WH, cộng regularization. |
+| Điểm MMR | Trong vòng chọn hiện tại, nên thêm câu nào? | Relevance của câu và similarity với các câu đã chọn. |
+| ROUGE | Bản tóm tắt tạo ra giống reference về từ/ngữ đến đâu? | Summary và reference summary. |
 
-Một cách hình dung: mỗi hàng của `V` là hồ sơ từ vựng của một câu; `W` mô tả câu pha các chủ đề ra sao; `H` mô tả chủ đề gắn với từ nào. Đây là diễn giải **latent factor**, không phải NMF đã tìm được nhãn chủ đề có sẵn.
+**Không cần reference để fit NMF hoặc chọn câu. Cần reference khi chấm ROUGE.**
 
-`k` là rank/số thành phần ẩn của xấp xỉ. Khi `k` nhỏ hơn nhiều so với số câu và số từ, `WH` biểu diễn dữ liệu qua không gian thấp chiều hơn. “Thấp chiều” là nén biểu diễn, không tự động có nghĩa là chất lượng summary cao hơn. `k` quá nhỏ có thể gộp ý khác nhau; quá lớn có thể chia nhỏ/nhiễu và tăng độ phức tạp.
+Tóm tắt trích xuất giữ dữ kiện/cách diễn đạt của câu gốc, nhưng việc bỏ các câu xung quanh vẫn có thể làm mất ngữ cảnh. Chẳng hạn câu bắt đầu bằng “Điều này…” có thể khó hiểu nếu câu giải thích trước đó không được giữ.
 
-### Không âm có ý nghĩa gì?
+## 2. Đoạn văn dùng xuyên suốt để minh họa
 
-Các hệ số không âm khiến biểu diễn là tổ hợp cộng: một từ/câu được giải thích bằng cách cộng đóng góp của các thành phần, không dùng một hệ số âm để triệt tiêu thành phần khác. Điều này thường giúp diễn giải kiểu “parts-based”, nhưng **không đảm bảo** mỗi topic luôn rõ ràng hoặc độc quyền.
+Đây là văn bản trong [data/demo/toy.json](../data/demo/toy.json):
 
-SVD/LSA cho phép hệ số âm; dấu âm không phải lỗi toán học. Có thể nói NMF có ràng buộc phù hợp với cách diễn giải cộng tính, không nên nói SVD “sai” hoặc “không thể dùng cho văn bản”.
+> Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai. Tuyến mới kết nối ga trung tâm với bệnh viện và hai trường đại học. Đơn vị vận hành bố trí mười xe, mỗi xe có sức chứa bốn mươi người. Giá vé được giữ bằng tuyến buýt thường. Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố. Tháng tới, đơn vị vận hành sẽ khảo sát mức độ hài lòng của hành khách.
 
-### `W` và `H` không tự động là xác suất
+Tách thành 6 câu:
 
-Các hàng của `W` và `H` không được ép tổng bằng 1 trong mô hình. Giá trị là trọng số nhân tử, không nên đọc trực tiếp như xác suất, tỷ lệ phần trăm hay độ tin cậy. Màn hình có thể chuẩn hóa một số điểm cho mục đích xếp hạng, nhưng đó là bước hậu xử lý.
-
-NMF còn có tính **không xác định**:
-
-- Có thể đổi thứ tự các topic mà `WH` không đổi.
-- Có thể nhân `W` với `c` và chia `H` cho `c` mà tích vẫn như cũ.
-- Nghiệm phụ thuộc khởi tạo và có thể dừng ở nghiệm cục bộ.
-
-Vì vậy, topic số 1 giữa hai lần fit không nhất thiết là cùng một chủ đề; cũng không nên so trực tiếp trị số riêng lẻ của `W/H` giữa hai lần chạy.
-
-## 4. Dữ liệu đầu vào và vector hóa
-
-Trong [sentences.py](../backend/app/core/sentences.py), văn bản được tách câu bằng regex, giữ nguyên nội dung câu và thứ tự. Đây là bộ tách gọn, không phải bộ phân tích ngữ pháp đầy đủ; viết tắt, số thập phân, dấu câu bất thường hoặc văn bản không chuẩn có thể làm tách câu chưa đúng.
-
-Trong [preprocess.py](../backend/app/core/preprocess.py):
-
-1. Tạo bản sao để xử lý, chuyển chữ thường.
-2. Dùng `underthesea.word_tokenize(..., format="text")` để tách từ tiếng Việt.
-3. Loại stopword theo `stopwords_vi.txt` khi tạo đặc trưng NMF.
-4. Không sửa câu nguyên bản được dùng để xuất summary.
-
-Trong [vectorize.py](../backend/app/core/vectorize.py), TF-IDF fit cục bộ trên các câu của một bài: unigram + bigram, `min_df=1`, `sublinear_tf=True`, chuẩn hóa L2 từng hàng, tối đa 800 đặc trưng. Ma trận cuối được chuyển sang dense `numpy` để phân rã.
-
-**Hệ quả của Local TF-IDF:** vocabulary và topic gắn với bài hiện tại, tránh topic/vocabulary từ corpus toàn cục kéo vào mọi bài. Đổi lại, bài ngắn có ít quan sát, ma trận rất thưa và topic không ổn định để so sánh xuyên nhiều bài. Mỗi bài có không gian từ vựng riêng.
-
-| | Local NMF hiện tại | Global NMF cũ |
+| Câu | Nội dung nguyên văn | Thông tin người đọc có thể nhận ra |
 | --- | --- | --- |
-| Vocabulary | Fit TF-IDF từ câu của bài đang gửi. | Dùng vocabulary/vectorizer đã fit trên corpus. |
-| Factors/topics | Fit mới cho từng bài, số chủ đề do k nhập hoặc bộ chọn. | Tái dùng các factor đã học từ model lưu; code benchmark ghi nhận model corpus 3260 bài. |
-| Điểm mạnh | Bám từ ngữ cục bộ; bài không bị áp vocabulary toàn cục. | Topic có thể ổn định hơn giữa tài liệu cùng miền và không cần fit factor từ đầu mỗi lần. |
-| Đổi lại | Bài ngắn/thưa làm k và topic không ổn định; không so topic trực tiếp giữa bài. | Từ ngoài vocabulary là OOV; topic toàn cục có thể không hợp nội dung bài mới. |
-| Trong dự án | API `/api/summarize` và hai method trên web. | Baseline trong `scripts/run_experiment.py` qua `compare.py`; không phải luồng summarize API. |
+| S1 | Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai. | Sự kiện khai trương. |
+| S2 | Tuyến mới kết nối ga trung tâm với bệnh viện và hai trường đại học. | Tuyến đi qua đâu. |
+| S3 | Đơn vị vận hành bố trí mười xe, mỗi xe có sức chứa bốn mươi người. | Quy mô vận hành. |
+| S4 | Giá vé được giữ bằng tuyến buýt thường. | Giá vé. |
+| S5 | Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố. | Tra cứu dịch vụ. |
+| S6 | Tháng tới, đơn vị vận hành sẽ khảo sát mức độ hài lòng của hành khách. | Đánh giá dịch vụ. |
 
-## 5. Objective: loss tính từ đâu?
+Cột cuối là cách **con người diễn giải** nội dung. Những tên này không phải nhãn được cung cấp cho NMF và cũng không phải nhãn NMF tự sinh.
 
-Loss được tính từ dữ liệu đầu vào `V` và ma trận tái tạo `WH`, không cần nhãn summary. Nó đo mức mô hình khớp lại ma trận TF-IDF. Trong code, tổng objective có dạng:
+Trong tài liệu dùng số câu S1-S6 để dễ đọc. Trong JSON/code, chỉ số bắt đầu từ 0: S1 có `index=0`, S6 có `index=5`.
 
-```text
-J(W,H) = data_fit(V, WH) + regularization(W,H)
+Nếu ngân sách là 3 câu, hệ thống giữ đúng `min(3,6)=3` câu khi luồng chọn câu hoàn tất. Nếu nguồn chỉ có 2 câu thì chỉ có thể giữ 2, dù bạn yêu cầu 3.
+
+## 3. Toàn bộ luồng xử lý trong một hình
+
+```mermaid
+flowchart TD
+    A["Văn bản nguồn"] --> B["Tách câu và giữ index gốc"]
+    B --> C["Tách từ tiếng Việt, tạo bản sao đã xử lý"]
+    C --> D["Fit TF-IDF cục bộ: V"]
+    D --> E["Nhập k hoặc tự chọn k"]
+    E --> F["Local NMF: V xấp xỉ W nhân H"]
+    F --> G["Tính relevance từ W"]
+    D --> I["Cosine giữa các câu từ V"]
+    G --> J["MMR chọn từng câu"]
+    I --> J
+    J --> K["Sắp lại theo index gốc và ghép summary"]
+    K --> L["Nếu có reference: tính ROUGE"]
 ```
 
-### Frobenius
+Nếu trình xem Markdown chưa hỗ trợ Mermaid, có thể đọc cùng luồng theo dòng sau:
 
 ```text
-D_F(V || WH) = 0.5 * sum_ij (V_ij - (WH)_ij)^2
+Văn bản → câu → token → TF-IDF V → k → NMF W/H
+        → relevance + redundancy → MMR → summary → ROUGE nếu có reference
 ```
 
-Frobenius phạt bình phương sai lệch tuyệt đối; một sai lệch lớn đóng góp nhiều hơn sai lệch nhỏ. Đây là một **tổng bình phương có hệ số 1/2**, không phải ROUGE và không nhất thiết là MSE đã lấy trung bình theo số ô.
+Những từ hay gặp:
 
-### Generalized KL divergence
+| Thuật ngữ | Hiểu theo cách đơn giản |
+| --- | --- |
+| Document | Một đơn vị văn bản dùng để tạo đặc trưng; trong Local TF-IDF này là một câu. |
+| Vocabulary | Danh sách từ/cụm từ mà vectorizer có cột để biểu diễn. |
+| Feature | Một cột đặc trưng; có thể là token hoặc bigram. |
+| Fit | Học thông tin/weights từ dữ liệu đang có. |
+| Transform | Biến dữ liệu sang một biểu diễn đã có sẵn quy tắc/weights. |
+| Topic/latent factor | Một thành phần ẩn mà NMF tìm ra; người đọc diễn giải qua từ và câu. |
+| Reconstruction | Ma trận WH dùng để xấp xỉ V. |
+| Regularization/penalty | Khoản phạt thêm vào objective để định hướng nghiệm. |
+| Seed | Giá trị điều khiển ngẫu nhiên để có thể chạy lại trong cùng môi trường. |
+| Fallback | Cách trả kết quả dự phòng khi luồng NMF không dùng được. |
+
+<a id="chuong-4"></a>
+
+## 4. Vì sao chuyển từ Global NMF sang Local NMF?
+
+### 4.1. Global NMF cũ
+
+Global model đã được học từ corpus riêng. Khi bạn đưa một bài mới vào, vectorizer cũ chỉ nhận những feature nó đã biết; estimator NMF dùng các topic đã lưu để `transform` bài mới.
+
+Ví dụ vocabulary cũ có `kinh_tế`, `chứng_khoán`, `doanh_nghiệp`, nhưng bài bạn gửi có các từ mới về một loại thiết bị. Những từ chưa có cột sẽ bị bỏ qua khi transform. Đây là **out-of-vocabulary (OOV)**.
+
+Top từ của một topic lấy từ H toàn cục có thể không xuất hiện trong bài mới. Điều này có thể gây hiểu nhầm trên màn hình keyword. Tuy nhiên, summary vẫn có thể là các câu nguồn: việc top keyword không có trong bài không đồng nghĩa mô hình đã sinh câu mới chứa từ đó.
+
+### 4.2. Local NMF hiện tại
+
+Hệ thống fit một TF-IDF mới trên các câu của chính bài đang gửi, rồi fit một NMF mới. Vocabulary và latent factors được tạo từ bài này.
+
+| Điểm so sánh | Global NMF cũ | Local NMF hiện tại |
+| --- | --- | --- |
+| Vocabulary | Có sẵn từ corpus trước đó. | Fit lại từ các câu của bài hiện tại. |
+| H/topic | Đã học từ corpus. | Học lại cho bài hiện tại. |
+| Khó khăn chính | OOV và lệch miền dữ liệu. | Ít quan sát khi bài ngắn, topic dễ thiếu ổn định. |
+| So topic giữa nhiều bài | Có thể dùng chung không gian topic nếu cùng model. | Không thể mặc định topic số 1 của hai bài là cùng ý. |
+| Trong repo | Baseline ngoại tuyến qua `compare.py`. | Luồng API tóm tắt đang hoạt động. |
+
+File `nmf_corpus.joblib` vẫn còn để benchmark Global NMF cũ, được code ghi nhận là model corpus 3260 bài. API `/api/summarize` hiện fit local và không gọi loader model đó. Lead-N và Global NMF cũng không còn là phần so sánh trên trang Đánh giá của web; chúng còn trong `scripts/run_experiment.py`.
+
+Local NMF hợp với mục tiêu bám bài người dùng gửi, nhưng không làm mọi topic tự động rõ nghĩa. Tính rõ nghĩa còn phụ thuộc câu, token, k, initialization và penalty.
+
+## 5. Tách câu và tiền xử lý: có sửa câu gốc không?
+
+Hệ thống giữ hai phiên bản:
+
+- **Câu nguyên bản:** để xuất summary.
+- **Câu đã xử lý:** để tạo vector và fit NMF.
+
+Ví dụ chạy thật của S1 với tokenizer hiện tại:
 
 ```text
-D_KL(V || WH) = sum_ij [ V_ij * log(V_ij / (WH)_ij) - V_ij + (WH)_ij ]
+Nguyên bản:
+Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai.
+
+Bản xử lý:
+thành_phố tuyến xe_buýt điện hai
 ```
 
-Với ô `V_ij = 0`, giới hạn của số hạng là `(WH)_ij`. Trong implementation có epsilon để tránh chia cho 0/log(0). KL bất đối xứng: đổi vai trò dữ liệu và reconstruction sẽ đổi kết quả.
+Dấu gạch dưới như `thành_phố`, `xe_buýt` cho biết Underthesea đã ghép nhiều tiếng thành một token. Đây là cách biểu diễn cho máy; trên web keyword được đổi dấu gạch dưới về dấu cách để dễ đọc.
 
-Ví dụ một ô `V=1`, `WH=2`:
-
-- Frobenius: `0.5 * (1 - 2)^2 = 0.5`.
-- KL: `1 * ln(1/2) - 1 + 2 ≈ 0.307`.
-
-Hai con số khác công thức, không thể từ ví dụ này nói loss nào tốt hơn. Trong dự án, KL là beta-divergence cấu hình cho NMF; **TF-IDF không phải phân phối xác suất đếm từ được chuẩn hóa theo topic**. Vì vậy không nên giải thích KL như “đúng hơn chắc chắn cho mọi văn bản” hay coi đây là bằng chứng KL tốt hơn Frobenius.
-
-### L1/L2 và objective mà scikit-learn dùng
-
-Scikit-learn cộng penalty vào data-fit. Trong cách bố trí `X = V` của project:
+Một ví dụ khác là S5:
 
 ```text
-L1(W,H) = alpha_W * n_terms * ||W||_1
-        + alpha_H * n_sentences * ||H||_1
+người_dân có_thể tra_cứu lịch chạy ứng_dụng thành_phố
 ```
 
-Với `l1_ratio=1`, objective hiện tại là `data_fit + L1(W,H)`. Tổng objective hiển thị ở kết quả tóm tắt gồm data loss và regularization; API còn trả riêng `data_loss` và `regularization_loss` để phân biệt hai phần.
+Các bước trong code là lowercase, Underthesea tách từ, giữ token hợp lệ và loại token khớp stopword. Một lưu ý thực tế: code so khớp **đúng token**. Stopword `có thể` với dấu cách không tự khớp token `có_thể`. Trong lần chạy mẫu này, `có_thể` vẫn còn; không nên mặc định mọi cụm có trong stopword file đã được loại.
 
-Trong `scikit-learn`, penalty của W được scale theo số feature (`n_terms`) và penalty của H theo số sample (`n_sentences`). Vì thế alpha không thể diễn giải độc lập với kích thước ma trận. Tham số `l1_ratio=0` chuyển sang L2; giá trị giữa 0 và 1 trộn L1/L2; nó không phải “phần trăm phần tử bằng 0”.
+Bộ tách câu hiện dùng regex. Viết tắt, dấu câu bất thường hoặc văn bản không chuẩn có thể làm số câu khác mong đợi. Khi kết quả khó hiểu, nên kiểm tra phân câu và token trước khi chỉ chỉnh NMF.
 
-### Loss không phải điểm chọn câu hoặc điểm chất lượng summary
+**Vị trí code:** [sentences.py](../backend/app/core/sentences.py), [preprocess.py](../backend/app/core/preprocess.py), [stopwords_vi.txt](../backend/app/core/stopwords_vi.txt).
 
-- Loss/objective: mức khớp `V ≈ WH` cộng penalty, đo trong quá trình fit NMF.
-- MMR score: điểm tham lam để chọn câu, tính sau khi có `W` và `V`.
-- ROUGE: so bản tóm tắt máy với reference do người tạo.
+## 6. TF-IDF: biến câu thành số thế nào?
 
-Không có reference vẫn tính được loss và vẫn tạo được summary. Muốn đánh giá similarity với bản tóm tắt tham chiếu thì cần reference để tính ROUGE. Không so trực tiếp số objective KL với Frobenius vì thang đo và hình dạng hàm khác nhau.
+### 6.1. TF và IDF đo hai việc khác nhau
 
-## 6. Điều chuẩn thưa: L1 đang làm gì?
+TF đo mức xuất hiện của một feature trong một câu. IDF tăng trọng số cho feature ít xuất hiện trong các câu của bài.
 
-L1 cộng một khoản tỷ lệ với tổng độ lớn tuyệt đối của các hệ số. Vì `W,H >= 0`, chuẩn L1 tương đương tổng các phần tử. Penalty làm mô hình có xu hướng giảm nhiều hệ số nhỏ và có thể tạo biểu diễn thưa hơn:
+Cấu hình hiện tại dùng sublinear TF và smooth IDF. Với một feature xuất hiện `c` lần, `c>0`:
 
-- L1 trên `W`: giảm độ phân tán câu-trên-chủ-đề; kỳ vọng câu tập trung hơn.
-- L1 trên `H`: giảm số từ/ngữ có trọng số đáng kể trong topic; kỳ vọng topic gọn hơn.
-- L1 trên cả hai: tác động lên hai biểu diễn cùng lúc.
+```text
+TF(c)  = 1 + ln(c)
+IDF(t) = ln((1 + n) / (1 + df(t))) + 1
+Giá trị trước chuẩn hóa = TF(c) × IDF(t)
+```
 
-Đây là **xu hướng/regularization**, không phải cam kết “mỗi câu chỉ có 1-2 topic” hay mỗi topic có chính xác N từ. L1 không đảm bảo các topic độc quyền hoặc semantic-coherent. Alpha quá lớn có thể làm factor gần 0, làm giảm thông tin và khiến hệ thống fallback Lead-N. Trong demo, `alpha=0.1` đã làm nhánh Frobenius suy biến; mặc định hiện là `0.001` như mức bảo thủ, **chưa được tune/khẳng định tối ưu trên corpus**.
+`n` là số câu; `df(t)` là số câu có feature `t`, không phải tổng số lần nó xuất hiện trong cả bài. Feature không có trong câu thì TF-IDF ở ô đó bằng 0.
 
-Độ thưa của ablation được đo theo ngưỡng tuyệt đối `1e-8`: tỷ lệ phần tử W/H không vượt ngưỡng, số topic hoạt động trung bình trên mỗi câu, và số từ hoạt động trung bình trong mỗi topic. Ngưỡng này là quy ước đo; đổi thang/chuẩn hóa có thể đổi số đếm. Đọc kèm ROUGE/fallback, không kết luận chỉ từ tỷ lệ zero.
+### 6.2. Ví dụ tính tay
 
-## 7. Solver, initialization và cấu hình thực tế
+Giả sử bài có 6 câu:
 
-### Luồng tóm tắt/đánh giá
+| Feature giả định | Có trong bao nhiêu câu? | IDF |
+| --- | ---: | ---: |
+| Một từ chỉ có trong 2 câu | 2 | `ln(7/3)+1 ≈ 1.847298` |
+| Một từ có trong 5 câu | 5 | `ln(7/6)+1 ≈ 1.154151` |
 
-[summarize.py](../backend/app/core/summarize.py) tạo estimator `sklearn.decomposition.NMF` mới cho mỗi lần fit:
+Nếu một câu chứa mỗi feature trên một lần, vector chưa chuẩn hóa là `[1.847298, 1.154151]`. Sau chuẩn hóa L2:
+
+```text
+[1.847298, 1.154151] / sqrt(1.847298² + 1.154151²)
+≈ [0.848083, 0.529863]
+```
+
+Feature hiếm nhận trọng số lớn hơn trong ví dụ này. Nếu xuất hiện hai lần thì TF là `1+ln(2) ≈ 1.693147`; việc lặp từ không làm TF tăng tuyến tính như đếm thô.
+
+### 6.3. Unigram, bigram và kích thước V
+
+Trong dự án:
+
+```text
+ngram_range = (1,2)     # token đơn và cặp token liên tiếp
+min_df = 1             # giữ feature có ở ít nhất một câu
+max_features = 800
+norm = "l2"            # chuẩn hóa mỗi hàng câu
+sublinear_tf = True
+```
+
+Ví dụ token `đơn_vị vận_hành bố_trí` sinh unigram `đơn_vị`, `vận_hành`, `bố_trí`, và bigram `đơn_vị vận_hành`, `vận_hành bố_trí`.
+
+Bigram được tạo **sau** tiền xử lý. Vì các từ giữa hai token có thể đã bị loại, một bigram như `điện hai` trong ví dụ không nhất thiết là một cụm có nghĩa trong nguồn. Bigram không phải công cụ tự tìm collocation hay cụm danh từ chuẩn ngữ nghĩa.
+
+Lần chạy thật của đoạn 6 câu ở phần 2 tạo `V` kích thước **6×65**. Số 65 là kết quả của vocabulary lúc chạy, không phải số từ cố định cho mọi văn bản.
+
+**Vị trí code:** [vectorize.py](../backend/app/core/vectorize.py). Chi tiết tham số có trong [TfidfVectorizer của scikit-learn](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html).
+
+## 7. V, W, H: đọc ma trận và thử nhân từng ô
+
+### 7.1. Chiều ma trận trong TopicSum
+
+```text
+V: n_câu × n_feature
+W: n_câu × k
+H: k × n_feature
+WH: n_câu × n_feature
+```
+
+Hàng i của W là trọng số các topic trong câu i. Hàng t của H là trọng số các feature trong topic t. `W = nmf.fit_transform(V)`; `H = nmf.components_` trong scikit-learn.
+
+Một số slide/paper dùng quy ước `từ × câu`; khi đó vai trò/trục W và H được chuyển vị. Báo cáo dự án này cần dùng nhất quán quy ước **câu × feature**.
+
+### 7.2. Ví dụ tính tay bằng ma trận nhỏ
+
+Ví dụ sau chỉ dùng 4 câu và 4 feature giả định để làm phép nhân dễ nhìn. Nó **không phải V/W/H fit từ đoạn văn ở phần 2**, và các hàng V này chưa chuẩn hóa L2.
+
+Giả sử 4 feature là `xe`, `tuyến`, `vé`, `dịch_vụ`:
+
+```text
+          xe  tuyến   vé   dịch_vụ
+V = [    1.0   1.0   0.0   0.0   ]
+    [    0.8   0.9   0.1   0.0   ]
+    [    0.0   0.0   1.0   1.0   ]
+    [    0.1   0.0   0.8   0.9   ]
+
+          T1    T2
+W = [    1.0   0.0   ]
+    [    0.8   0.1   ]
+    [    0.0   1.0   ]
+    [    0.1   0.8   ]
+
+          xe  tuyến   vé   dịch_vụ
+H = [    1.0   1.0   0.0   0.0   ]   # T1
+    [    0.0   0.0   1.0   1.0   ]   # T2
+```
+
+Có thể diễn giải T1 thiên về `xe/tuyến`, T2 thiên về `vé/dịch_vụ`. Đây là tên người đọc đặt sau khi xem H.
+
+Ô câu 2, feature `tuyến` được tái tạo bằng:
+
+```text
+(WH)[2,tuyến] = W[2,T1] × H[T1,tuyến] + W[2,T2] × H[T2,tuyến]
+             = 0.8×1.0 + 0.1×0.0 = 0.8
+```
+
+Dữ liệu V ở ô đó là 0.9. Mô hình xấp xỉ thành 0.8 nên có sai lệch 0.1.
+
+Nhân đầy đủ:
+
+```text
+WH = [   1.0   1.0   0.0   0.0   ]
+     [   0.8   0.8   0.1   0.1   ]
+     [   0.0   0.0   1.0   1.0   ]
+     [   0.1   0.1   0.8   0.8   ]
+```
+
+V và WH gần nhau nhưng không bằng nhau. Phần 9 sẽ tính loss từ chính ví dụ này.
+
+### 7.3. Vì sao gọi là biểu diễn thấp chiều?
+
+Câu ban đầu có `m` feature. Hàng W biểu diễn câu bằng `k` hệ số. Nếu `k` nhỏ hơn nhiều so với `m`, biểu diễn câu được thu gọn vào ít thành phần hơn.
+
+Với ví dụ thật `V:6×65` và `k=2`, W là `6×2`, H là `2×65`. Nói chính xác: `rank(WH) ≤ k`; k là số thành phần được yêu cầu, không bảo đảm các thành phần độc lập để rank thực sự bằng k.
+
+### 7.4. W/H không phải xác suất và nghiệm không duy nhất
+
+`W[i,t]=0.8` không có nghĩa “câu i có 80% xác suất thuộc topic t”. NMF không tự ép các hàng tổng bằng 1. Code chuẩn hóa một số đại lượng để xếp hạng, nhưng đó là bước tính điểm sau fit.
+
+Ngoài ra:
+
+```text
+(2W) × (H/2) = W×H
+```
+
+Tích không đổi dù weights riêng lẻ đổi. Có thể đổi thứ tự topic mà tích vẫn giữ nguyên. Vì vậy không dùng độ lớn W/H hoặc số thứ tự topic để so sánh đơn giản giữa các bài/lần fit. Penalty giúp định hướng thang weights, nhưng không biến chúng thành xác suất.
+
+<a id="chuong-8"></a>
+
+## 8. NMF học từ gì khi không có nhãn?
+
+Dữ liệu để học là V. W và H là các tham số được điều chỉnh để WH gần V, đồng thời đáp ứng ràng buộc không âm và regularization.
+
+```text
+V giữ nguyên
+W/H thay đổi qua vòng tối ưu
+WH được tính lại
+Loss/objective đánh giá W/H mới
+```
+
+Bản tóm tắt tham chiếu không tham gia `fit_transform(V)` trong pipeline này. Đây là quá trình fit không giám sát.
+
+Bài toán NMF không lồi đồng thời theo W và H. Những initialization khác nhau có thể cho nghiệm khác; việc dừng hội tụ không chứng minh đã đạt nghiệm tốt nhất toàn cục. “Hội tụ” thường nghĩa là cải thiện objective đủ nhỏ theo quy tắc dừng hoặc đã tới giới hạn vòng.
+
+## 9. Frobenius và KL: công thức, ví dụ và sự khác biệt
+
+### 9.1. Data loss khác total objective
+
+```text
+Total objective = Data loss + Regularization loss
+```
+
+Data loss đo chênh lệch V và WH. Regularization loss phạt weights W/H. Với cùng V, tăng alpha có thể làm regularization tăng và nghiệm thay đổi; không so total objective giữa các alpha khác nhau để chọn alpha tốt nhất.
+
+### 9.2. Frobenius: bình phương sai lệch từng ô
+
+```text
+D_F(V,WH) = 0.5 × sum_ij (V_ij - (WH)_ij)²
+```
+
+Ví dụ một ô có `V=1`, `WH=2`: đóng góp là `0.5×(1-2)²=0.5`.
+
+Với ma trận nhỏ ở phần 7, có 4 ô lệch 0.1:
+
+```text
+D_F = 0.5 × (0.1² + 0.1² + 0.1² + 0.1²) = 0.02
+```
+
+Tên chính xác trong code là nửa tổng bình phương sai số Frobenius. MSE thường chia tiếp cho số ô; MAE dùng giá trị tuyệt đối thay vì bình phương. Vì vậy không gọi mọi số loss Frobenius là “MSE trung bình”.
+
+Bình phương làm sai lệch lớn có sức nặng cao: lỗi 2 đóng góp gấp 100 lần lỗi 0.2. Đặc điểm này có thể không hợp mục tiêu ở một số dữ liệu, nhưng cũng có thể là điều mong muốn ở dữ liệu khác.
+
+### 9.3. Generalized KL: xét mức tái tạo theo giá trị dữ liệu
+
+```text
+D_KL(V || Y) = sum_ij [V_ij × ln(V_ij / Y_ij) - V_ij + Y_ij]
+Y = WH
+```
+
+Khi `V_ij=0`, số hạng được hiểu bằng giới hạn và bằng `Y_ij`. Khi `V_ij>0` mà `Y_ij` tiến về 0, penalty tăng mạnh. Code dùng epsilon để tránh vấn đề số học.
+
+| V của một ô | Y=WH | Frobenius cho ô | KL cho ô |
+| ---: | ---: | ---: | ---: |
+| 1.0 | 2.0 | 0.500000 | 0.306853 |
+| 0.1 | 0.2 | 0.005000 | 0.030685 |
+| 1.0 | 1.1 | 0.005000 | 0.004690 |
+| 0.0 | 0.2 | 0.020000 | 0.200000 |
+| 1.0 | 0.1 | 0.405000 | 1.402585 |
+
+Hai hàng `0.1→0.2` và `1.0→1.1` đều lệch tuyệt đối 0.1, nên Frobenius bằng nhau. KL khác nhau vì mức tăng gấp đôi một giá trị nhỏ khác với mức tăng 10% một giá trị lớn.
+
+Với ma trận ở phần 7, tổng KL xấp xỉ **0.212009**. Hai ô V bằng 0 nhưng Y bằng 0.1 đóng góp tổng 0.2; hai ô V=0.9 nhưng Y=0.8 đóng góp phần còn lại.
+
+### 9.4. Cách so sánh đúng
+
+| | Frobenius | Generalized KL |
+| --- | --- | --- |
+| Kiểu phạt | Bình phương sai lệch tuyệt đối. | Divergence phụ thuộc cả V và reconstruction. |
+| Tính đối xứng của data loss | Có với hai ma trận. | Không. |
+| Khi V>0 và Y rất gần 0 | Sai lệch hữu hạn nếu V hữu hạn. | Phạt rất mạnh. |
+| Khi V=0 | Phạt `0.5×Y²`. | Phạt Y. |
+| Trị số trực tiếp có cùng đơn vị/thang để so không? | Không thể lấy một số Frobenius so thắng/thua với một số KL. | Tương tự. |
+
+Generalized KL có liên hệ với mô hình dữ liệu dạng đếm, nhưng đầu vào hiện tại là TF-IDF chuẩn hóa, không phải số đếm thô hoặc phân phối xác suất chủ đề. Lựa chọn KL ở đây là một objective hợp lệ cho ma trận không âm; muốn nói tốt hơn cho tóm tắt thì cần thử nghiệm đầu ra.
+
+Trong cùng một loại loss, trên cùng dữ liệu và cấu hình penalty, objective giảm thường cho thấy fit đang cải thiện theo mục tiêu đó. Nó vẫn không bảo đảm ROUGE hoặc mạch lạc của summary tăng.
+
+## 10. L1 và độ thưa: hiểu bằng số nhỏ
+
+### 10.1. “Thưa” nghĩa là gì?
+
+Một hàng như `[0.8, 0.0, 0.0, 0.0]` thưa hơn hàng `[0.2,0.2,0.2,0.2]`: ít phần tử hoạt động hơn.
+
+- W thưa: câu có ít topic mang trọng số đáng kể.
+- H thưa: topic có ít feature mang trọng số đáng kể.
+- V thưa: câu chỉ chứa một phần nhỏ vocabulary. Đây là tính chất đầu vào, khác với độ thưa của factors sau fit.
+
+Các phần tử rất nhỏ có thể được xem là gần 0 theo ngưỡng. Trong ablation hiện tại, ngưỡng là `1e-8`.
+
+### 10.2. L1 phạt tổng độ lớn, không đếm số zero
+
+```text
+||W||_1 = sum_ij |W_ij|
+```
+
+W/H không âm nên có thể cộng trực tiếp các phần tử.
+
+Ví dụ hai hàng:
+
+```text
+A = [0.8,0.6,0.4] → L1=1.8
+B = [0.8,0.0,0.0] → L1=0.8
+```
+
+B có penalty thấp hơn. Nhưng:
+
+```text
+C = [0.6,0.6,0.0] → L1=1.2
+D = [1.2,0.0,0.0] → L1=1.2
+```
+
+C và D có số phần tử hoạt động khác nhau nhưng cùng penalty. L1 **khuyến khích** nghiệm thưa trong quá trình tối ưu; nó không trực tiếp đếm nonzero như chuẩn L0, và không tự quy định “mỗi câu chỉ còn 2 topic”.
+
+### 10.3. Objective đúng theo kích thước của project
+
+Đặt `n=n_sentences`, `m=n_terms`, `r=l1_ratio`:
+
+```text
+a = alpha_W × m
+b = alpha_H × n
+
+Regularization = r × (a×sum(W) + b×sum(H))
+               + 0.5×(1-r) × (a×sum(W²) + b×sum(H²))
+```
+
+| l1_ratio | Loại penalty nếu alpha > 0 |
+| ---: | --- |
+| 1 | Toàn bộ L1. |
+| 0 | Toàn bộ L2. |
+| 0.5 | Trộn L1 và L2 theo công thức. |
+
+Muốn baseline **không regularization** thì đặt `alpha_W=alpha_H=0`. Chỉ đặt `l1_ratio=0` với alpha dương sẽ chuyển sang L2.
+
+### 10.4. Tính total objective cho ma trận phần 7
+
+Ở đó n=m=4, `sum(W)=3.8`, `sum(H)=4`. Đặt cả hai alpha bằng 0.001 và r=1:
+
+```text
+Penalty W = 0.001×4×3.8 = 0.0152
+Penalty H = 0.001×4×4.0 = 0.0160
+Regularization         = 0.0312
+
+Frobenius objective = 0.020000 + 0.0312 = 0.051200
+KL objective        = 0.212009 + 0.0312 ≈ 0.243209
+```
+
+Phép tính này giải thích vì sao objective có thể lớn hơn data loss: phần chênh lệch là penalty. Hai total trên cũng không phải hai điểm summary để chọn cái nhỏ hơn.
+
+### 10.5. Alpha lớn hơn có tốt hơn không?
+
+Alpha tăng làm penalty có sức nặng hơn trong lựa chọn nghiệm. W/H có thể gọn hơn, nhưng mô hình cũng có thể bỏ mất thông tin cần tái tạo V. Trong trường hợp mạnh, factors co về 0 và code trả fallback.
+
+Mặc định hiện là `alpha_W=alpha_H=0.001`, `l1_ratio=1`. Giá trị 0.1 từng làm nhánh Frobenius suy biến trong demo trước đó. Mức 0.001 là mặc định thận trọng; dữ liệu validation của project còn rỗng nên chưa có căn cứ gọi nó là alpha tối ưu.
+
+Weight lớn không tự động là sai. Độ lớn phụ thuộc thang factorization; mục đích regularization là định hướng độ phức tạp và trade-off với reconstruction.
+
+### 10.6. Lưu ý sâu hơn: scale của W/H và ablation một phía
+
+Nếu chỉ phạt W, có thể xét phép biến đổi:
+
+```text
+W_mới = 0.1×W
+H_mới = 10×H
+W_mới H_mới = WH
+```
+
+Data loss không đổi, nhưng penalty W giảm 10 lần. H tăng mà không bị phạt. Đây là lý do không thể mặc định “W nhỏ hơn/gần 0 hơn” chứng minh câu tập trung topic hơn khi chỉ regularize một phía.
+
+Code hiện không áp thêm ràng buộc norm cố định cho từng topic trong fit. Vì vậy các thống kê threshold tuyệt đối của W-only/H-only cần đọc thận trọng: một phần thay đổi có thể do rescaling. Khi phạt cả hai, rescaling bị đánh đổi giữa hai penalty; tổng penalty dạng `a×c×sum(W) + b×sum(H)/c` sẽ định hướng thang c.
+
+Đây là giới hạn diễn giải ablation hiện tại, không phải một kết quả thực nghiệm rằng mọi lượt W-only đều đã xảy ra hiện tượng này.
+
+## 11. Solver MU, initialization và dừng hội tụ
+
+### 11.1. MU làm gì?
+
+MU là **Multiplicative Update**, cập nhật hệ số bằng cách nhân hệ số hiện tại với một tỷ lệ không âm.
+
+Ví dụ minh họa một hệ số h:
+
+```text
+h_cũ=0.8; tỷ lệ=0.5 → h_mới=0.4
+h_cũ=0.8; tỷ lệ=1.5 → h_mới=1.2
+```
+
+Các tỷ lệ được tính từ V, W, H và penalty. Từng vòng cập nhật H rồi W, tính lại reconstruction và objective. Công thức giữ các hệ số không âm.
+
+Minh họa tác động penalty khi các đại lượng khác tạm giữ cố định:
+
+```text
+h_mới = 0.8×0.4/0.8       = 0.4
+có penalty thêm mẫu số:
+h_mới = 0.8×0.4/(0.8+0.1) ≈ 0.3556
+```
+
+Trong fit thật, các đại lượng khác cũng thay đổi nên không thể coi mọi weight đều giảm đơn điệu.
+
+### 11.2. Initialization là điểm bắt đầu
+
+Luồng tóm tắt dùng `init="nndsvdar"`: khởi tạo theo NNDSVD, lấp vị trí zero bằng giá trị nhỏ ngẫu nhiên. Nó dùng SVD làm bước khởi tạo, nhưng mô hình sau đó vẫn là NMF không âm.
+
+Nếu một hệ số bằng 0 và chỉ được nhân với tỷ lệ, nó sẽ vẫn bằng 0. Hiện tượng này thường gọi là zero locking. Initialization có các giá trị nhỏ dương giúp tránh zero ngay từ đầu; trong quá trình fit, weights vẫn có thể rất nhỏ hoặc bằng 0.
+
+Seed điều khiển ngẫu nhiên; cùng input/config/seed trong cùng môi trường thường chạy lại được. Đổi phiên bản tokenizer/thư viện có thể đổi vocabulary và kết quả, nên báo cáo cần lưu cả versions.
+
+### 11.3. Hai implementation có mục đích khác nhau
+
+| | Trang 01 / Mô phỏng | Tóm tắt/Đánh giá/Ablation |
+| --- | --- | --- |
+| Implementation | `fit_nmf` tự cài trong `nmf.py`. | `sklearn.decomposition.NMF` trong `summarize.py`. |
+| Initialization | Random uniform dương theo seed. | `nndsvdar`. |
+| Số vòng | Request `iterations`, API tối đa 20; có thể dừng sớm. | `max_iter=500`, dừng theo tolerance của estimator. |
+| Trace | Snapshot W/H/WH/loss mỗi vòng. | Không trả trace optimizer từng vòng. |
+| Regularization | Trang 01 cố định alpha W/H=0.001, ratio=1. | Tham số cấu hình được ở các luồng liên quan. |
+
+Custom MU dừng sớm nếu từ vòng 5 trở đi cải thiện tương đối không âm và nhỏ hơn `1e-5`. Scikit-learn không được truyền `tol` riêng trong code này nên dùng mặc định của estimator (`1e-4` ở môi trường được kiểm tra).
+
+Đồ thị trang 01 giúp hiểu cách tối ưu, nhưng không phải snapshot từ lần fit scikit-learn tạo summary. Objective của hai implementation cũng không nên được so như cùng một đường hội tụ nếu initialization/dừng khác nhau.
+
+Scikit-learn hỗ trợ KL với solver `mu`; Frobenius có thể dùng `mu` hoặc `cd`. Project dùng `mu` cho cả hai biến thể. [Tài liệu NMF](https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.NMF.html) mô tả các solver và tham số; cấu hình cụ thể của project nằm trong `_fit_local_nmf`.
+
+<a id="chuong-12"></a>
+
+## 12. Chọn k: chọn bao nhiêu chủ đề và dựa vào gì?
+
+### 12.1. k khác số câu cần giữ
+
+- `k=2`: fit hai thành phần NMF.
+- `summary_sentences=3`: chọn ba câu cho summary.
+
+Bạn có thể có 2 topic và chọn 3 câu, hoặc 3 topic và chọn 2 câu. MMR hiện không có quy tắc bắt buộc “mỗi topic phải được một câu”.
+
+k quá nhỏ có thể gộp nội dung; k quá lớn có thể chia nhỏ hoặc khớp nhiễu. Không có một k đúng sẵn cho mọi bài.
+
+### 12.2. Khi nhập k
+
+Code dùng k đã nhập nhưng giới hạn không vượt quá `min(n_sentences,n_terms)`. Trường hợp này được ghi `k_selection_method="requested"`; candidate score là null vì không có CV để chấm lựa chọn tay đó.
+
+### 12.3. Khi để trống: masked positive-entry KL CV
+
+1. Thử `k=1..min(10,n_sentences,n_terms)`.
+2. Mỗi trial chọn ngẫu nhiên khoảng 20% **ô TF-IDF dương** để giữ lại.
+3. Tạo mask để không tính những ô bị giữ lại trong objective fit.
+4. Fit custom KL-NMF **không L1/L2** trên các ô còn lại, tối đa 120 vòng.
+5. Tính mean KL giữa V thật và reconstruction tại các ô bị giữ lại.
+6. Lặp 10 trial; lấy mean score cho mỗi k; chọn score nhỏ nhất.
+
+Ví dụ tính tay: một ô bị che có V=0.6. k=1 dự đoán 0.2, k=2 dự đoán 0.5. Tính KL cho ô đó:
+
+```text
+k=1: 0.6×ln(0.6/0.2)-0.6+0.2 ≈ 0.259167
+k=2: 0.6×ln(0.6/0.5)-0.6+0.5 ≈ 0.009393
+```
+
+k=2 khôi phục ô này tốt hơn. Selector cộng/xét nhiều ô và nhiều trial; nó không quyết định từ một ô duy nhất.
+
+Che một ô khác với sửa V thành 0 và bắt model tái tạo 0. Mask bảo rằng ô đó không tham gia fit; sau fit dùng giá trị gốc của nó để validation.
+
+### 12.4. Khi không đủ dữ liệu
+
+Nếu chỉ có một k khả thi, code trả k đó với `single_feasible_k`. Nếu số ô dương ít hơn 4 và có nhiều k khả thi, dùng heuristic `max(1,n_sentences//2)` được giới hạn theo số k khả thi. Hai trường hợp này không có CV score: API trả null.
+
+### 12.5. Score này có ý nghĩa đến đâu?
+
+Nó đo khả năng khôi phục **các ô dương bị che**, không dùng reference và không đo ROUGE. Các ô zero không nằm trong tập validation; cùng selector KL được dùng cả khi final model là Frobenius.
+
+Đây là heuristic chọn rank cho representation. Nó không chứng minh k đó tạo keyword rõ nhất hoặc summary tốt nhất. Với rất ít ô/câu, các lượt mask có thể thiếu thông tin để phục hồi một hàng hoặc một feature. Hiện code không trả khoảng tin cậy cho score.
+
+Score cũng chỉ so các k trong cùng input/protocol; không coi score của hai bài khác nhau là một bảng chất lượng summary chung.
+
+## 13. Relevance: NMF đưa trọng số W thành điểm câu thế nào?
+
+Đây là cách code hiện tính, khác với cách đơn giản chỉ cộng các weights của từng câu.
+
+### 13.1. Ba bước
+
+```text
+salience[t] = sum_i W[i,t] / sum_it W[i,t]
+
+P[i,t] = W[i,t] / sum_t W[i,t]
+raw_relevance[i] = sum_t P[i,t] × salience[t]
+
+relevance[i] = raw_relevance[i] / max_j raw_relevance[j]
+```
+
+Code cộng epsilon vào các mẫu số. Có thể hiểu salience là mức phổ biến tương đối của topic trong weights W; P là tỷ lệ tương đối các topic của một câu. Relevance cao khi câu thiên về những topic có salience cao.
+
+### 13.2. Ví dụ tính tay
+
+Dùng ví dụ riêng có 3 câu A/B/C:
+
+```text
+         T1  T2
+W = A [  2   0  ]
+    B [  1   1  ]
+    C [  0   1  ]
+```
+
+Tổng theo topic là `[3,2]`, tổng tất cả là 5:
+
+```text
+salience = [0.6,0.4]
+P_A=[1,0]; P_B=[0.5,0.5]; P_C=[0,1]
+```
+
+| Câu | Raw relevance | Chuẩn hóa theo max=0.6 |
+| --- | ---: | ---: |
+| A | `1×0.6+0×0.4=0.6` | 1.000000 |
+| B | `0.5×0.6+0.5×0.4=0.5` | 0.833333 |
+| C | `0×0.6+1×0.4=0.4` | 0.666667 |
+
+Theo riêng relevance, A đứng trước B, rồi C. MMR có thể thay đổi quyết định sau khi A được chọn.
+
+### 13.3. Các giới hạn của công thức
+
+Khi k=1 và mọi hàng W có weights dương, P mỗi câu xấp xỉ `[1]`. Relevance gần bằng nhau cho mọi câu. Khi salience giữa các topic gần bằng nhau, nhiều câu cũng nhận relevance gần bằng nhau. Selector k không tối ưu công thức relevance này nên vẫn có thể chọn k=1.
+
+Việc chuẩn hóa hàng bỏ phần lớn độ lớn tổng W của câu. Đây là lựa chọn thiết kế scoring, không phải một định lý NMF nói cách này luôn tốt nhất. Nó còn phụ thuộc scale của factors, vì salience được tính từ W chưa chuẩn hóa theo topic.
+
+Một hàng W toàn 0 không có phân phối topic hữu ích; code cho relevance thấp/0. `dominant_topic` lấy argmax không tự cung cấp độ tin cậy, nhất là khi weights đều gần 0.
+
+## 14. MMR: vừa chọn câu liên quan vừa phạt trùng lặp
+
+### 14.1. Redundancy được tính với ai?
+
+Cho S là tập câu đã chọn:
+
+```text
+redundancy(i) = max cosine(V_i,V_j), với j thuộc S
+cosine(a,b)  = dot(a,b)/(norm(a)×norm(b))
+```
+
+Chưa có câu nào được chọn thì redundancy=0. Khi có nhiều câu, lấy **độ tương tự lớn nhất** với bất kỳ câu đã chọn nào, không chỉ câu gần nhất theo thứ tự chọn và không bắt buộc cùng dominant topic.
+
+Ví dụ similarity với 3 câu đã chọn là `[0.2,0.8,0.4]` thì redundancy=0.8, không phải trung bình và không phải chỉ 0.4 của câu vừa chọn.
+
+### 14.2. Công thức MMR
+
+```text
+MMR(i) = lambda×relevance(i) - (1-lambda)×redundancy(i)
+```
+
+Mặc định lambda=0.7. Trong mỗi vòng, câu có MMR cao nhất được thêm vào S, rồi tính lại redundancy cho ứng viên còn lại.
+
+### 14.3. Tính đủ hai vòng từ ví dụ A/B/C
+
+Dùng relevance ở phần 13, yêu cầu chọn 2 câu, lambda=0.7.
+
+**Vòng 1:** S rỗng, redundancy mọi câu=0.
+
+| Câu | Relevance | Redundancy | MMR |
+| --- | ---: | ---: | ---: |
+| A | 1.000000 | 0 | 0.700000 |
+| B | 0.833333 | 0 | 0.583333 |
+| C | 0.666667 | 0 | 0.466667 |
+
+Chọn A. Giả sử cosine B với A là 0.9, C với A là 0.1. Đây là các similarity minh họa, không phải output fit của ma trận phần 7.
+
+**Vòng 2:**
+
+| Câu | Relevance | Redundancy với A | MMR |
+| --- | ---: | ---: | ---: |
+| B | 0.833333 | 0.9 | `0.7×0.833333-0.3×0.9 ≈ 0.313333` |
+| C | 0.666667 | 0.1 | `0.7×0.666667-0.3×0.1 ≈ 0.436667` |
+
+Chọn C. Dù B có relevance cao hơn C, B gần trùng A nên được điểm thấp hơn trong vòng này.
+
+### 14.4. Chọn và xuất là hai thứ tự khác nhau
+
+Nếu thứ tự greedy là S5 → S2 → S6, code cuối cùng xuất S2 → S5 → S6. Sắp theo index giúp giữ mạch diễn tiến của bài gốc; nó không đổi tập câu đã chọn.
+
+Nếu điểm bằng nhau chính xác, code ưu tiên relevance cao hơn, rồi index nguồn nhỏ hơn. Nếu các điểm chỉ bằng nhau sau khi làm tròn trên UI, giá trị đầy đủ có thể khác ở chữ số rất nhỏ và ảnh hưởng thứ tự chọn.
+
+### 14.5. Đọc bảng từng câu và trace đúng cách
+
+- Câu được chọn lưu điểm tại vòng nó được chọn.
+- Câu không được chọn lưu điểm tại vòng cuối nó được xét.
+- `score_round` cho biết điểm thuộc vòng nào.
+- `selection_trace` là nơi xem tất cả ứng viên trong cùng một vòng.
+
+Không lấy một điểm ở vòng 1 so với một điểm ở vòng 3 để nói câu nào “đáng chọn hơn” tại mọi thời điểm: các tập S và redundancy đã khác.
+
+### 14.6. MMR có bảo đảm summary tốt nhất không?
+
+MMR là lựa chọn greedy theo công thức, không duyệt mọi tổ hợp câu để chứng minh summary tối ưu. Similarity hiện là TF-IDF lexical: hai câu đồng nghĩa dùng từ khác có thể cosine thấp; hai câu trái nghĩa nhưng nhiều từ chung có thể cosine cao. MMR cũng không trực tiếp giải quyết đại từ, liên kết câu hoặc phủ hết các topic.
+
+Lambda=1 chỉ xếp relevance; lambda=0 ưu tiên ít trùng theo similarity, và ở lượt đầu mọi score bằng 0 nên tie-break ảnh hưởng. Cần chọn lambda theo mục tiêu/validation.
+
+## 15. Từ khóa topic: vì sao chưa thành một tên chủ đề rõ?
+
+### 15.1. Code xếp từ theo hai đại lượng
+
+```text
+p(t,v) = H[t,v] / sum_v H[t,v]
+e(t,v) = H[t,v] / sum_t H[t,v]
+distinctive_score(t,v) = p(t,v) × e(t,v)
+```
+
+p nói feature mạnh trong topic đến đâu. e nói weight feature đó tập trung ở topic này so với các topic khác đến đâu. Tích hai đại lượng được dùng để xếp tối đa 5 feature mỗi topic.
+
+Ví dụ feature X có H ở hai topic là `[0.8,0.2]`: exclusivity ở topic 1 là 0.8. Feature Y có weights `[0.8,0.8]`: exclusivity ở topic 1 chỉ 0.5. Dù cùng H=0.8 ở topic 1, X đặc trưng hơn xét theo tỷ lệ qua topic, nếu các đại lượng khác tương đương.
+
+Câu đại diện được chọn theo W đã chuẩn hóa theo hàng; tối đa hai câu mỗi topic. Cùng một câu có thể làm đại diện cho nhiều topic.
+
+### 15.2. Vì sao keyword có thể khó hiểu?
+
+- Các latent factors không có nhãn ngữ nghĩa được giám sát.
+- Một bài ngắn không đủ nhiều câu để tách các chủ đề ổn định.
+- Unigram/bigram có thể chồng nhau như `giá`, `vé`, `giá vé`.
+- Bigram sau bỏ stopword có thể không phải cụm nguyên gốc.
+- Token của stopword có thể chưa khớp định dạng trong list.
+- Một topic có ít feature dương thì top 5 không có nghĩa cả 5 đều mạnh; code chưa tự gán độ tin cậy/nhãn cho topic.
+
+Muốn hiểu topic, xem **keyword cùng câu đại diện**. Nếu tự đặt tên “Thông tin tuyến xe” trong slide, hãy ghi đó là cách diễn giải của người báo cáo, không phải output nhãn của NMF.
+
+## 16. Query và PRF: tóm tắt theo mối quan tâm của người dùng
+
+Query là nội dung bạn muốn ưu tiên, chẳng hạn “giá vé” hoặc “mức độ hài lòng”. Đây không phải prompt để sinh câu; nó ảnh hưởng điểm relevance của các câu nguồn.
+
+Nhánh KL hiện hỗ trợ PRF:
+
+1. Tiền xử lý query và `transform` nó bằng vectorizer của bài.
+2. Tính similarity với câu; lấy tối đa 3 câu có similarity dương làm pseudo-relevant, còn giới hạn theo ngân sách summary.
+3. Lấy centroid các vector câu đó.
+4. Trộn `0.5×query_vector + 0.5×centroid`, chuẩn hóa L2.
+5. Tính query relevance cho câu và chuẩn hóa theo max.
+6. Trộn với topic relevance bằng `query_weight` rồi đưa vào MMR.
+
+Ví dụ minh họa, một câu có topic relevance=0.6, query relevance=1.0 và query_weight=0.5:
+
+```text
+relevance_mới = (1-0.5)×0.6 + 0.5×1.0 = 0.8
+```
+
+Câu được ưu tiên hơn theo query nhưng vẫn có thể bị MMR phạt nếu gần trùng câu đã chọn. Hai tỷ lệ 0.5 ở bước mở rộng query và tham số `query_weight` ở bước trộn relevance là hai thao tác riêng.
+
+“Pseudo-relevant” nghĩa là tạm coi các câu gần query ban đầu là liên quan, không có người gán nhãn xác nhận. Nếu lấy nhầm câu, PRF có thể kéo truy vấn lệch hướng. Query OOV/không còn token hữu ích sẽ được báo lý do; summary vẫn chạy theo topic relevance thường.
+
+PRF trong code là cách triển khai thực dụng lấy ý tưởng từ nghiên cứu query-focused summarization; chưa tái lập nguyên biểu diễn/protocol paper.
+
+<a id="chuong-17"></a>
+
+## 17. Chạy thật đoạn 6 câu: đối chiếu lý thuyết với output
+
+### 17.1. Cấu hình của lần chạy minh họa
+
+Đây là kết quả chạy core code ngày 12-10-2026 với:
+
+```text
+input: data/demo/toy.json
+k=2                         # cố định để minh họa hai topic
+summary_sentences=3
+seed=42
+mmr_lambda=0.7
+alpha_W=alpha_H=0.001
+l1_ratio=1.0
+query=None
+
+scikit-learn=1.7.2
+underthesea=9.5.0
+numpy=2.2.6
+rouge-score=0.1.2
+V: 6×65; W: 6×2; H: 2×65
+```
+
+k=2 ở đây là cấu hình chọn tay cho ví dụ, không phải k mà auto selector đã chọn.
+
+### 17.2. Output thực tế của hai method
+
+| Method | Data loss | Regularization | Total objective | Thứ tự greedy | Câu xuất sau khi sắp nguồn |
+| --- | ---: | ---: | ---: | --- | --- |
+| Local KL + L1 + MMR | 19.841107 | 0.283730 | 20.124838 | S2 → S5 → S3 | S2, S3, S5 |
+| Local Frobenius + L1 + MMR | 1.862525 | 0.217167 | 2.079691 | S1 → S6 → S5 | S1, S5, S6 |
+
+**KL summary:**
+
+> Tuyến mới kết nối ga trung tâm với bệnh viện và hai trường đại học. Đơn vị vận hành bố trí mười xe, mỗi xe có sức chứa bốn mươi người. Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố.
+
+**Frobenius summary:**
+
+> Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai. Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố. Tháng tới, đơn vị vận hành sẽ khảo sát mức độ hài lòng của hành khách.
+
+Không kết luận Frobenius tốt hơn chỉ vì 2.079691 nhỏ hơn 20.124838. Hai số là hai objective khác nhau. Người đọc có thể nhận ra KL giữ quy mô/tuyến đi, Frobenius giữ sự kiện/đánh giá; để chấm overlap cần thêm cùng reference, để chấm mạch lạc cần tiêu chí đọc.
+
+### 17.3. Một vòng MMR thật của Frobenius
+
+Sau khi S1 được chọn, ở vòng 2:
+
+| Ứng viên | Relevance | Redundancy với S1 | MMR xấp xỉ |
+| --- | ---: | ---: | ---: |
+| S2 | 1.000000 | 0.125404 | 0.662379 |
+| S3 | 0.983480 | 0.000000 | 0.688436 |
+| S5 | 1.000000 | 0.066711 | 0.679987 |
+| S6 | 0.983480 | 0.000000 | 0.688436 |
+
+S3 và S6 hiển thị bằng nhau ở 6 chữ số nhưng full precision của S6 cao hơn một chút, nên code chọn S6. Ở vòng 3, S3 bị penalty vì cosine với S6 khoảng 0.146670, còn S5 tiếp tục có score khoảng 0.679987 và được chọn.
+
+Ví dụ này cho thấy cần xem score theo đúng vòng và tránh diễn giải chênh lệch rất nhỏ như khác biệt nội dung chắc chắn.
+
+### 17.4. Auto-k thật cho cùng V và seed
+
+| k | Mean held-out KL |
+| ---: | ---: |
+| 1 | 4.799174 |
+| 2 | 5.060524 |
+| 3 | 6.224318 |
+| 4 | 7.128896 |
+| 5 | 11.449355 |
+| 6 | 5.116459 |
+
+Selector chọn **k=1** trong lần chạy này. Điều đó có nghĩa rank 1 tốt nhất theo protocol held-out đang dùng cho bài này. Nó không bảo đảm relevance phân biệt câu tốt nhất; phần 13 đã chỉ ra k=1 làm relevance dễ gần bằng nhau.
+
+### 17.5. Cách chạy lại core ví dụ
+
+Đoạn Python sau cần được chạy trong môi trường backend và từ thư mục `backend`:
 
 ```python
-NMF(
-    n_components=k,
-    init="nndsvdar",
-    solver="mu",
-    beta_loss="kullback-leibler"  # hoặc "frobenius"
-    alpha_W=alpha_w,
-    alpha_H=alpha_h,
-    l1_ratio=l1_ratio,
-    max_iter=500,
-    random_state=seed,
-)
+import json
+from pathlib import Path
+from app.core.summarize import summarize
+
+text = json.loads(Path("../data/demo/toy.json").read_text(encoding="utf-8"))["text"]
+for method in ["local_kl_mmr", "local_frobenius_mmr"]:
+    result = summarize(
+        text=text, k=2, summary_sentences=3, seed=42,
+        method=method, mmr_lambda=0.7,
+        alpha_w=0.001, alpha_h=0.001, l1_ratio=1.0,
+    )
+    print(method, result["summary"])
+    print("Câu giữ lại:", [index + 1 for index in result["selected_indices"]])
+    print("Objective:", result["loss_value"])
 ```
 
-`solver="mu"` là multiplicative update; đây là solver được scikit-learn yêu cầu khi dùng KL/Itakura-Saito beta loss. Frobenius cũng có thể chạy bằng MU. `nndsvdar` là NNDSVD với các giá trị nhỏ ngẫu nhiên để lấp chỗ zero; seed kiểm soát phần ngẫu nhiên. Số vòng thực tế còn phụ thuộc điều kiện hội tụ/tolerance, nên `max_iter=500` là giới hạn trên, không phải lời khẳng định luôn chạy đủ 500 vòng.
+Số liệu có thể đổi nếu tokenizer, stopwords, code hoặc dependencies đổi. Khi đó cập nhật ví dụ theo cấu hình mới, không giữ bảng cũ như kết quả mới.
 
-Hai method tóm tắt hiện dùng chung `alpha_W`, `alpha_H`, `l1_ratio`, `k`, seed, TF-IDF và MMR; phần chủ đích thay đổi là `beta_loss`: KL so với Frobenius. Dù tham số được ghép cặp, nghiệm có thể khác vì objective khác.
+<a id="chuong-18"></a>
 
-### Luồng trang mô phỏng
+## 18. ROUGE: tính rõ một ví dụ từ đầu đến cuối
 
-`/api/simulate` gọi `fit_nmf` trong [nmf.py](../backend/app/core/nmf.py), một MU tự cài đặt với khởi tạo ngẫu nhiên đều và snapshots qua số vòng do người dùng yêu cầu. Response ghi `implementation="educational_custom_mu"`.
+### 18.1. Nguồn, candidate và reference
 
-Đây là mô phỏng độc lập để quan sát phép cập nhật và loss; không phải trace từng vòng từ estimator scikit-learn của luồng tóm tắt. Vì khác initialization, công thức triển khai và điều kiện dừng, không dùng đồ thị trang này để khẳng định W/H của production giống hệt từng vòng.
+Ví dụ riêng để dễ đếm token:
 
-## 8. Cách chọn `k`
+**Nguồn:**
 
-Nếu người dùng nhập `k`, code giới hạn nó không vượt quá `min(n_sentences, n_terms)`. Nếu không nhập, [select_k_by_imputation](../backend/app/core/nmf.py) dùng quy trình:
+> Xe buýt điện giảm khí thải. Thành phố mở tuyến mới. Hành khách tra cứu lịch chạy.
 
-1. Xét các `k` từ 1 đến `min(10, n_sentences, n_terms)`.
-2. Lấy vị trí có TF-IDF dương; ở mỗi trial giữ lại ngẫu nhiên khoảng 20% vị trí để validation, 10 trial.
-3. Fit custom KL-NMF **không regularization** trên các ô còn lại, với mask để các ô bị giữ lại không tham gia fit.
-4. Tính mean generalized-KL trên các phần tử dương bị giữ lại.
-5. Chọn `k` có điểm validation nhỏ nhất.
+**Candidate trích xuất:**
 
-Trường hợp số quan sát dương quá ít, code dùng heuristic `max(1, n_sentences // 2)` (giới hạn theo k khả thi) và trả `score=null`; nếu chỉ có một k khả thi, trả một k khả thi, cũng không tạo score giả. Seed điều khiển các lượt mask/khởi tạo, nên cùng input + seed cho kết quả lặp lại.
+> Xe buýt điện giảm khí thải.
 
-**Cách diễn giải đúng:** đây là masked positive-entry KL reconstruction CV, một heuristic chọn độ hạng theo khả năng khôi phục các ô TF-IDF dương bị che. Nó không dùng reference summary, không tối ưu ROUGE, không đo topic interpretability, và không tối ưu riêng cho Frobenius. Do bỏ qua các ô zero trong tập validation, đây cũng không phải đánh giá đầy đủ mọi ô ma trận. Hãy báo rõ tên phương pháp, không gọi nó là k tối ưu tuyệt đối.
+**Reference do người viết, dùng cho minh họa:**
 
-`k` là số thành phần tiềm ẩn chứ không phải số câu giữ lại. Với cùng một văn bản/seed, mô phỏng, tóm tắt và đánh giá dùng chung chính sách chọn k; trang Đánh giá truyền k đã chọn cho nhánh thứ hai để ghép cặp.
+> Xe buýt điện giảm ô nhiễm.
 
-## 9. Cách xếp hạng topic và giải thích từ khóa
+Candidate là câu nguyên văn trong nguồn. Reference dùng cách diễn đạt hơi khác. ROUGE so candidate với reference; văn bản nguồn không phải reference mặc định.
 
-Trong `_topic_terms`:
-
-1. Chuẩn hóa mỗi hàng H thành phân phối tương đối trong topic.
-2. Tính độ độc quyền tương đối của từ bằng tỷ lệ trọng số từ đó ở topic này so với tổng qua các topic.
-3. Xếp từ theo tích hai đại lượng, hiển thị tối đa 5 cụm từ mỗi topic.
-4. Chọn tối đa 2 câu đại diện theo tỷ lệ W chuẩn hóa theo hàng.
-
-Các từ có thể là unigram/bigram sau Underthesea và loại stopword; chúng không phải nhãn tự nhiên. Ví dụ một nhóm `thành phố`, `tuyến xe`, `hành khách` có thể cần người xem đặt tên chủ đề dựa trên câu đại diện. Nếu topic chưa rõ, kiểm tra chất lượng phân câu, stopword, số câu, n-gram, alpha và k; không “sửa nhãn” như thể NMF đã sinh nhãn đúng.
-
-## 10. Chọn câu bằng MMR
-
-MMR trong project dùng relevance theo topic và redundancy theo cosine TF-IDF:
+### 18.2. Token của project trong lần kiểm tra
 
 ```text
-MMR(i) = lambda * relevance(i)
-       - (1 - lambda) * max_cosine(V_i, V_j), j thuộc các câu đã chọn
+Candidate: [xe_buýt, điện, giảm, khí_thải]
+Reference: [xe_buýt, điện, giảm, ô_nhiễm]
 ```
 
-Ở lượt đầu, chưa có câu đã chọn nên redundancy bằng 0. Relevance được tính từ W: salience topic tỷ lệ với tổng W theo topic, W mỗi câu được chuẩn hóa theo hàng, sau đó relevance được scale theo giá trị lớn nhất. Đây là điểm xếp hạng nội bộ, không phải xác suất hay điểm ROUGE.
+Mỗi bên có 4 token. Bộ tính ROUGE giữ stopword và dấu tiếng Việt; không dùng bộ stemming tiếng Anh. Hai từ `khí_thải` và `ô_nhiễm` không khớp bề mặt dù người đọc thấy liên hệ nghĩa.
 
-Nếu có query (chỉ nhánh KL hiện hỗ trợ): query được biến thành vector trong vocabulary cục bộ; chọn tối đa ba câu pseudo-relevant, trộn query với centroid câu đó, rồi trộn điểm query relevance với topic relevance theo `query_weight`. Nếu query không khớp vocabulary, backend trả lý do và vẫn chạy MMR thường.
+### 18.3. ROUGE-1
 
-Ví dụ minh họa với `lambda=0.7`:
-
-| Câu ứng viên | Relevance | Redundancy lớn nhất | MMR |
-| --- | ---: | ---: | ---: |
-| A | 0.82 | 0.00 | `0.7×0.82 - 0.3×0 = 0.574` |
-| B | 0.68 | 0.00 | `0.476` |
-| C ở lượt 2 | 0.55 | 0.10 | `0.355` |
-| B ở lượt 2, sau khi A đã chọn | 0.68 | 0.70 | `0.266` |
-
-Lượt 1 chọn A. Sang lượt 2, C có điểm cao hơn B vì B giống A quá nhiều, dù B có relevance cao hơn. Redundancy không yêu cầu cùng dominant topic: câu bị so độ tương tự với **mọi** câu đã chọn, bất kể nhãn topic của chúng. Hệ thống chọn greedy đúng ngân sách rồi sắp các câu đã chọn theo index gốc để summary đọc theo thứ tự nguồn.
-
-`selection_trace` lưu ứng viên và điểm theo từng vòng. Chỉ so điểm của các câu trong **cùng vòng**; sang vòng sau, tập câu đã chọn thay đổi nên redundancy/điểm thay đổi. Lambda cao ưu tiên relevance; lambda thấp phạt trùng lặp mạnh hơn, nhưng không có một lambda tốt cho mọi văn bản.
-
-## 11. Đánh giá: ROUGE khác loss thế nào?
-
-[evaluate.py](../backend/app/core/evaluate.py) dùng chung tokenizer Underthesea cho mọi phương pháp; với ROUGE giữ dấu tiếng Việt và không bỏ stopword, không dùng English stemmer.
-
-- **ROUGE-1 F1**: overlap unigram, tính precision/recall rồi F1.
-- **ROUGE-2 F1**: overlap bigram liên tiếp, nhạy hơn với cụm từ/trật tự cục bộ.
-- **ROUGE-L F1**: overlap theo longest common subsequence, có tính đến trật tự nhưng không yêu cầu các token đứng cạnh nhau.
-
-Với mỗi metric, gọi `overlap` là số đơn vị unigram/bigram/LCS khớp theo cách tính của metric:
+Có 3 unigram khớp: `xe_buýt`, `điện`, `giảm`.
 
 ```text
-precision = overlap / số đơn vị trong candidate
-recall    = overlap / số đơn vị trong reference
-F1        = 2 * precision * recall / (precision + recall)
+Precision = 3/4 = 0.75
+Recall    = 3/4 = 0.75
+F1 = 2×P×R/(P+R) = 0.75
 ```
 
-Nếu precision + recall bằng 0 thì F1 bằng 0. Trong project các giá trị được trả ở thang `[0,1]`, giao diện thường định dạng bốn chữ số thập phân.
+Nếu token lặp, overlap được đếm theo multiset: một token xuất hiện 2 lần ở candidate và 1 lần ở reference chỉ khớp tối đa 1 lần, không chỉ xem có/không.
 
-Các điểm nằm trong `[0,1]`; cao hơn nghĩa là bề mặt từ/ngữ giống reference hơn theo metric đó. ROUGE không trực tiếp đo độ thật, mạch lạc, mức bao phủ mọi ý hay chất lượng diễn đạt; một reference duy nhất cũng có thể không bao quát hết các summary tốt.
+### 18.4. ROUGE-2
 
-Trang **Đánh giá** nhận văn bản nguồn và reference, sinh **hai** summary (KL+L1+MMR và Frobenius+L1+MMR) trên cùng cấu hình, sau đó chấm mỗi summary với cùng reference. Nó không chỉ chấm một summary có sẵn. Mục tiêu là quan sát tác động của objective lên đầu ra dưới cấu hình được ghép cặp, không phải suy luận loss nào tốt hơn chỉ từ trị số objective.
+Candidate có 3 bigram:
 
-## 12. Ablation L1 và benchmark ngoại tuyến
+```text
+xe_buýt điện
+điện giảm
+giảm khí_thải
+```
 
-### Ablation trên trang 04
+Reference có:
 
-Bốn điều kiện của `run_l1_ablation`:
+```text
+xe_buýt điện
+điện giảm
+giảm ô_nhiễm
+```
 
-| Tên | Alpha W | Alpha H | Câu hỏi kiểm tra |
+Khớp 2/3 bigram ở mỗi bên, nên Precision=Recall=F1≈0.666667.
+
+### 18.5. ROUGE-L
+
+Chuỗi con chung dài nhất là `[xe_buýt, điện, giảm]`, độ dài 3. “Chuỗi con” ở đây giữ thứ tự nhưng các token không cần đứng cạnh nhau trong hai chuỗi.
+
+```text
+P_L=3/4; R_L=3/4; F1_L=0.75
+```
+
+Các điểm chạy thật qua `rouge_f1` trong project đúng là:
+
+| Metric | F1 |
+| --- | ---: |
+| ROUGE-1 | 0.750000 |
+| ROUGE-2 | 0.666667 |
+| ROUGE-L | 0.750000 |
+
+### 18.6. Vì sao không dùng nguồn làm reference luôn?
+
+Nguồn chứa cả chi tiết phụ và dài hơn summary. Dùng nguồn làm target sẽ ưu tiên giữ nhiều từ/chi tiết nguồn, nhưng không cho biết bạn đã chọn đúng các ý người tóm tắt mong muốn. Reference summary là mục tiêu nội dung ngắn được người viết xác định; vẫn cần ghi rõ cách tạo reference và bias có thể có.
+
+### 18.7. ROUGE cao có nghĩa gì và không cho biết gì?
+
+ROUGE cao thường nghĩa overlap với reference tốt hơn theo metric đó. Nó không kiểm tra trực tiếp sự thật, phủ định, liên kết đại từ hay mạch lạc. Paraphrase tốt có thể nhận điểm thấp; một câu chứa nhiều từ reference nhưng diễn đạt sai vẫn có thể nhận điểm cao.
+
+Giữ nhiều câu có thể tăng recall nhưng giảm precision. Vì vậy khi so methods, cần cùng ngân sách/tỷ lệ tóm tắt, cùng reference và tokenizer. F1 cân bằng precision/recall; code project trả F1 trong `[0,1]`, không tự đổi sang phần trăm.
+
+**Vị trí code:** [evaluate.py](../backend/app/core/evaluate.py). Nguồn nền: [Lin, ROUGE, 2004](https://aclanthology.org/W04-1013/).
+
+## 19. Trên web, mỗi phần nói điều gì?
+
+### 19.1. Trang 01: Mô phỏng NMF
+
+Nhập text, method, k hoặc auto, iterations và seed. Trang này dùng alpha cố định 0.001 trên W/H, ratio=1, và custom MU.
+
+V là đầu vào; W/H là weights từng snapshot; WH là tái tạo. Loss ở vòng 0 tính từ initialization; vòng sau dùng weights đã cập nhật. Đồ thị đi xuống nói objective custom đang giảm trên lần chạy đó.
+
+Panel Ứng viên k là score từ lượt chọn k riêng, không phải loss của từng snapshot final NMF. Hai panel có thể dùng các số rất khác nhau vì data/mask/penalty và mục đích khác.
+
+### 19.2. Trang 02: Tóm tắt văn bản
+
+Có method, k, số câu, MMR lambda, alpha W/H, L1 ratio và query/weight tùy chọn trên KL. Trang này hiện **không có input seed**; request schema summarize cũng không khai báo seed, nên core dùng mặc định **42**.
+
+Các kết quả:
+
+| Vùng | Cách đọc |
+| --- | --- |
+| k và phương pháp | k thực dùng, do bạn nhập hay selector chọn. |
+| Objective | `data_loss + regularization_loss`. |
+| Ứng viên k | Điểm CV để chọn rank; thấp hơn tốt theo tiêu chí đó. |
+| Bản tóm tắt | Câu gốc, sắp theo nguồn. |
+| Keyword/câu đại diện | Hỗ trợ diễn giải topic, không phải nhãn phân loại. |
+| Phân tích câu | Relevance/redundancy/score ở `score_round`. |
+| Trace MMR | So ứng viên trong cùng vòng chọn. |
+| Fallback/query warning | Thông tin khi NMF hoặc query không dùng được như dự định. |
+
+Một số nhãn panel/objective ID vẫn chứa chữ L1 khi `l1_ratio` đã đổi. Nếu ratio=0 hoặc ở giữa, giá trị regularization thực được tính theo L2 hoặc L1/L2; đọc tham số để biết penalty thực, không chỉ dựa vào nhãn “L1 penalty”.
+
+### 19.3. Trang 03: Đánh giá
+
+Nhập nguồn và reference, cấu hình chung k/ngân sách/alpha/L1/MMR/seed. API tạo KL summary trước; truyền cùng k đã dùng sang Frobenius; chấm hai output với cùng reference.
+
+Trang này đang sinh và chấm hai summary, không chỉ nhận một candidate đã tóm tắt sẵn. Vì vậy việc có tham số NMF là để tạo hai output cần so sánh. Phần chấm ROUGE bản thân chỉ cần candidate/reference.
+
+Response evaluate hiện không trả riêng fallback reason của từng method. Nếu nghi một output là fallback, chạy lại ở trang 02 với cấu hình phù hợp hoặc xem report ablation/CLI để xác nhận, không mặc định mọi summary ở bảng ROUGE đều là NMF thành công.
+
+### 19.4. Trang 04: Ablation L1
+
+Nhập một bài và reference trực tiếp, chọn alpha, k tùy chọn, số câu, lambda và các seed. Kết quả là thí nghiệm pilot một bài qua các khởi tạo; CLI mới dùng JSONL để chạy nhiều bài.
+
+### 19.5. Những giá trị mặc định quan trọng
+
+| Tham số | Mặc định/hiện trạng | Mục đích |
+| --- | --- | --- |
+| Method tóm tắt | `local_kl_mmr` | Chọn data loss KL. |
+| k | Để trống: selector | Rank/số thành phần NMF. |
+| Số câu | 3 | Ngân sách output. |
+| MMR lambda | 0.7 | Cân bằng relevance và redundancy. |
+| Alpha W/H | 0.001 / 0.001 | Cường độ regularization; chưa tune corpus. |
+| L1 ratio | 1.0 | Mặc định pure L1. |
+| Core seed | 42 | Initialization và selector. |
+| Query weight | 0.5 | Trộn topic/query relevance khi PRF có hiệu lực. |
+| NMF final max_iter | 500 | Giới hạn optimizer sklearn. |
+
+Để so k giữa trang 01 và 02, dùng cùng text, cùng preprocessing và seed=42 ở trang 01. Đổi seed trên trang 01 hoặc Đánh giá có thể đổi mask/initialization, trong khi trang 02 vẫn dùng 42. Dùng chung **cách** chọn k không có nghĩa cùng **kết quả** nếu đầu vào/seed khác.
+
+## 20. Ablation L1: đọc bảng theo từng câu hỏi
+
+### 20.1. Bốn nhánh kiểm tra
+
+| Nhánh | Alpha W | Alpha H | Câu hỏi |
 | --- | ---: | ---: | --- |
 | KL không L1 | 0 | 0 | Mốc không regularization. |
-| KL + L1 trên W | α | 0 | Tác động phạt biểu diễn câu-topic. |
-| KL + L1 trên H | 0 | α | Tác động phạt biểu diễn topic-từ. |
-| KL + L1 trên W và H | α | α | Tác động của phạt cả hai factor. |
+| L1 trên W | α | 0 | Đổi regularization phía câu-topic thì output/weights ra sao? |
+| L1 trên H | 0 | α | Đổi regularization phía topic-feature thì ra sao? |
+| L1 trên W và H | α | α | Phạt cả hai có tác động gì? |
 
-Các điều kiện được ghép cặp theo bài/seed, dùng cùng k (chọn một lần), ngân sách câu, MMR lambda và query PRF tắt. So ROUGE ghép cặp với baseline, tỷ lệ zero/active của W,H, runtime, fallback. Không xếp hạng các objective khác penalty bằng tổng loss vì penalty khác nhau.
+Query PRF tắt trong mọi nhánh. Cùng bài/seed, k được chọn một lần bằng selector không regularization rồi truyền cho cả bốn nhánh. Ngân sách câu/MMR giữ cố định. Đây là cách ghép cặp để giảm khác biệt không liên quan tới penalty.
 
-Form web nhận trực tiếp **một bài + reference**, chạy các seed đã nhập; đây là pilot. Nhiều seed trên một bài chỉ cho biết độ nhạy khởi tạo của bài đó, không thay thế nhiều bài độc lập.
+### 20.2. ROUGE và delta
 
-### Benchmark CLI
+Ví dụ tính tay một cặp cùng bài/seed:
 
-`scripts/run_experiment.py` chạy ngoại tuyến trên JSONL và so sánh Lead-N, Global NMF cũ, Local KL+L1+MMR, Local Frobenius+L1+MMR. Kết quả gồm `metrics.csv`, `predictions.jsonl`, `report.json`. Nó yêu cầu `id`, `article`, `reference_summary`.
+```text
+ROUGE-1 baseline = 0.40
+ROUGE-1 L1 W+H   = 0.44
+Delta           = 0.44-0.40 = +0.04
+```
 
-Global NMF với 3260 bài được nạp qua `backend/app/core/compare.py` cho **baseline batch**; route `/api/summarize` không gọi module đó. Trên web hiện tại không còn trang so sánh Global NMF và Lead-N. `nmf_corpus.joblib` vẫn được đóng gói/đọc ở nhánh benchmark, nên không mô tả là file đã bị xóa khỏi toàn bộ repo.
+`+0.04` là tăng 4 điểm phần trăm khi quy sang thang 0-100, không phải mặc định “tăng 4% tương đối”. Mức tăng tương đối trong ví dụ là `0.04/0.40=10%`.
 
-## 13. Các trang web và API
+Project tính delta từng cặp `id+seed` rồi mới lấy mean. Delta dương nói các cặp đang xét có overlap cao hơn; delta âm nói thấp hơn. Không đủ để kết luận tổng quát từ một bài.
 
-| Trang | Backend/API | Dùng để trình bày |
+### 20.3. Mean ± SD
+
+Ví dụ `0.420 ± 0.010` là mean và độ lệch chuẩn qua các lượt thành công theo cách aggregate của code, không phải khoảng tin cậy 95%. Code dùng `pstdev` (độ lệch chuẩn dân số của các giá trị có trong report).
+
+Một seed có SD=0 vì chỉ có một giá trị, không chứng minh phương pháp ổn định. Nhiều seed trên một bài đo độ nhạy khởi tạo cho bài đó, không đo độ bất định giữa nhiều bài.
+
+### 20.4. W/H gần 0 và số phần tử hoạt động
+
+Ví dụ một hàng W có 4 weights:
+
+```text
+[0.8, 0.0, 1e-10, 0.3]
+```
+
+Với threshold `1e-8`, có 2 phần tử gần 0 → tỷ lệ 0.5; có 2 topic hoạt động. Report lấy trung bình theo toàn bộ ma trận/câu/topic tương ứng.
+
+W gần 0 lớn hơn không tự động nghĩa ROUGE tốt hơn. Alpha có thể làm co weights, scale có thể đổi (đặc biệt one-sided penalty), hoặc topic thực sự gọn hơn. Đọc kèm phần 10.6, output và fallback.
+
+### 20.5. Fallback, lỗi và runtime
+
+Ablation tổng hợp các metric chính trên lượt NMF thành công; fallback và lỗi được đếm riêng. Paired delta chỉ tính khi cả nhánh đang xét và baseline của cùng cặp có kết quả thành công.
+
+Nếu nhiều fallback, mean ROUGE của phần còn lại có thể chỉ đại diện các bài dễ; cần báo sample size/paired_count/fallback/error, không chỉ mean.
+
+Runtime ablation là thời gian gọi summarize với k đã cố định; thời gian chọn k được báo riêng. Objective khác penalty không được dùng để xếp hạng bốn nhánh.
+
+**Vị trí code/tài liệu:** [ablation.py](../backend/app/core/ablation.py), [ABLATION_L1.md](ABLATION_L1.md), [run_ablation.py](../scripts/run_ablation.py).
+
+<a id="chuong-21"></a>
+
+## 21. Những gì đã chạy được và những gì chưa được chứng minh
+
+Hệ thống đã có pipeline local, hai data losses, penalty điều chỉnh được, custom simulation, MMR trace, PRF trên KL, ROUGE và ablation. Có chức năng chạy thật không đồng nghĩa đã có bằng chứng chất lượng tổng quát.
+
+Ngày kiểm tra này, các file sau có kích thước 0 byte:
+
+```text
+data/raw/articles.jsonl
+data/splits/train.jsonl
+data/splits/val.jsonl
+data/splits/test.jsonl
+results/metrics.csv
+```
+
+Do đó chưa có benchmark corpus hợp lệ để tuyên bố KL/Frobenius thắng, alpha tối ưu, k selector tốt nhất hoặc L1 tăng ROUGE. `data/demo/toy.json` và `data/ablation_demo.jsonl` là dữ liệu minh họa, không thay thế test set.
+
+Đánh giá nên theo trình tự:
+
+1. Chuẩn bị các bài có reference và quyền sử dụng, ghi nguồn/cách tạo reference.
+2. Chia theo **bài**; không đưa câu của một bài sang nhiều split.
+3. Chọn cấu hình/grid trên validation. Local NMF vẫn fit theo từng bài; train split không tự tạo global model mới trong flow này.
+4. Khóa cấu hình rồi chạy test độc lập.
+5. Báo ROUGE, số bài hợp lệ, fallback/error, thời gian và một số ca tốt/xấu.
+6. Nếu cần kết luận thống kê, đánh giá theo các bài độc lập và bổ sung uncertainty/đánh giá người đọc.
+
+So cùng tham số ở web cho biết thay data loss trong cấu hình đó làm output thay đổi thế nào. Alpha giống số không có nghĩa regularization có sức nặng tương đối bằng nhau so với hai data losses. Để so các method đã tune, cần cùng ngân sách search/protocol validation, rồi đánh giá cấu hình đã khóa trên test.
+
+Selector auto-k tốn nhiều lần fit: tối đa 10 k × 10 trial, sau đó còn final NMF. Vì thế auto-k có thể là phần tốn thời gian đáng kể. V được chuyển dense với tối đa 800 feature; số câu tăng vẫn tăng bộ nhớ/thời gian. Không mặc định NMF luôn nhanh hơn mọi phương pháp trong mọi thiết lập.
+
+## 22. Paper liên quan và mức độ tương ứng
+
+| Nguồn nghiên cứu | Ý tưởng chính | Quan hệ với code hiện tại |
 | --- | --- | --- |
-| 01 / Mô phỏng NMF | `POST /api/simulate` | Nhập bài, chọn objective/k/seed/số vòng; xem V/W/H/WH, breakdown loss và snapshot custom MU. |
-| 02 / Tóm tắt văn bản | `POST /api/summarize` | Chọn method, k hoặc auto, số câu, MMR lambda, seed, alpha W/H, L1 ratio; query tùy chọn chỉ cho KL; xem summary/topic/trace/fallback. |
-| 03 / Đánh giá | `POST /api/evaluate` | Nhập nguồn + reference; sinh hai summary cùng cấu hình và trả ROUGE-1/2/L. |
-| 04 / Ablation L1 | `POST /api/ablation`, polling job và tải artifact | Chạy các nhánh penalty; form web hiện là một bài pilot. |
+| Lee & Seung, NMF/MU | Phân rã không âm và cập nhật nhân tử cho objective. | Nền tảng giải thích; custom MU minh họa và sklearn là hai implementations. |
+| Aghdam, NMFTS (2023) | Thêm regularization quan hệ cặp câu để đưa các câu liên hệ gần nhau trong biểu diễn tiềm ẩn. | Nhánh nghiên cứu cũ đã rút khỏi API/web; KL+L1 hiện tại không đồng nhất với NMFTS. |
+| Wang et al., symmetric NMF (SIGIR 2008) | Semantic sentence similarity, symmetric factorization để gom câu và chọn đại diện. | SNMF đồ thị câu đã rút khỏi web; không phải phương pháp `V≈WH` hiện tại. |
+| Park & An, PRF với NMF | Dùng query và pseudo-relevant content cho tóm tắt cá nhân hóa. | PRF thực dụng trên nhánh KL lấy cảm hứng, chưa khớp nguyên representation/dataset/protocol paper. |
+| Carbonell & Goldstein, MMR | Cân bằng relevance với novelty khi rerank/chọn. | Công thức greedy MMR với relevance tùy cách định nghĩa của project và similarity TF-IDF. |
+| Lin, ROUGE | Chấm overlap của candidate và reference. | Dùng rouge-score với tokenizer tiếng Việt của project. |
 
-FastAPI schemas nằm trong [schemas.py](../backend/app/schemas.py), route trong [main.py](../backend/app/main.py). React điều hướng trong [App.jsx](../frontend/src/App.jsx); các trang giao diện nằm ở `frontend/src/pages/`.
+Khi báo cáo, phân biệt **dùng ý tưởng nghiên cứu**, **dùng thư viện triển khai** và **tái hiện toàn bộ paper**. Muốn gọi là tái hiện cần đối chiếu objective, biểu diễn, dữ liệu, preprocessing và protocol đánh giá gốc.
 
-## 14. So sánh dễ nhớ
+## 23. Bản đồ file để nối kiến thức với code
 
-| Cặp khái niệm | Câu hỏi mà nó trả lời | Có reference cần không? |
-| --- | --- | --- |
-| KL/Frobenius loss | `WH` tái tạo `V` tốt đến đâu theo objective đã chọn? | Không. |
-| L1 penalty | Factor bị phạt tổng độ lớn bao nhiêu, và có xu hướng thưa ra sao? | Không. |
-| k masked-KL | Mức độ hạng nào khôi phục tốt hơn các ô TF-IDF dương bị che? | Không. |
-| MMR | Trong các câu còn lại, câu nào cân bằng relevance và novelty tốt nhất vòng này? | Không. |
-| ROUGE | Summary có overlap từ/ngữ bao nhiêu với reference? | Có. |
+| File/hàm | Nội dung cần tìm |
+| --- | --- |
+| [sentences.py](../backend/app/core/sentences.py) | `split_sentences`: tách câu giữ thứ tự. |
+| [preprocess.py](../backend/app/core/preprocess.py) | `tokenize_words`, `preprocess_sentences`: token tiếng Việt và stopwords. |
+| [vectorize.py](../backend/app/core/vectorize.py) | `fit_sentence_vectorizer`: Local TF-IDF. |
+| [nmf.py](../backend/app/core/nmf.py) | `objective_breakdown`, `fit_nmf`, `select_k_by_imputation`: loss, custom MU, auto-k. |
+| [summarize.py](../backend/app/core/summarize.py) | `_fit_local_nmf`, `_topic_relevance`, `_select_sentences`, `_topic_terms`, `_query_feedback`, `summarize`. |
+| [evaluate.py](../backend/app/core/evaluate.py) | `rouge_f1` và tokenizer ROUGE. |
+| [ablation.py](../backend/app/core/ablation.py) | `run_l1_ablation`: ghép cặp bốn penalty, thống kê/export. |
+| [compare.py](../backend/app/core/compare.py) | Loader Global NMF cho benchmark ngoại tuyến. |
+| [schemas.py](../backend/app/schemas.py) | Các trường request/response, validation và defaults. |
+| [main.py](../backend/app/main.py) | Route simulate/summarize/evaluate/ablation. |
+| [App.jsx](../frontend/src/App.jsx) | Điều hướng bốn trang. |
+| [Visualizer.jsx](../frontend/src/pages/Visualizer.jsx) | Snapshot và loss custom MU. |
+| [Summarizer.jsx](../frontend/src/pages/Summarizer.jsx) | Form summary, objective, topic/câu/trace. |
+| [Evaluation.jsx](../frontend/src/pages/Evaluation.jsx) | Tạo/chấm hai output với cấu hình chung. |
+| [Ablation.jsx](../frontend/src/pages/Ablation.jsx) | Form nhập một bài/reference và bảng ablation. |
+| [run_experiment.py](../scripts/run_experiment.py) | Batch Lead-N/Global NMF/hai Local NMF và export. |
+| [tune_params.py](../scripts/tune_params.py) | Search cấu hình trên validation. |
 
-Một summary có thể có loss thấp nhưng ROUGE thấp; một summary có ROUGE cao không chứng minh factorization tối ưu. Đây là các bài toán/tiêu chí khác nhau.
+Một request summarize hiện có thể dùng:
 
-## 15. Điều nên và không nên khẳng định
+```json
+{
+  "text": "Văn bản nguồn cần tóm tắt...",
+  "method": "local_kl_mmr",
+  "k": 2,
+  "summary_sentences": 3,
+  "mmr_lambda": 0.7,
+  "alpha_w": 0.001,
+  "alpha_h": 0.001,
+  "l1_ratio": 1.0
+}
+```
 
-### Có thể nói
+Muốn auto-k thì bỏ trường k hoặc dùng null. Tên trường số câu là `summary_sentences`, không phải `top_n`. `top_n` không phải trường request schema của endpoint này.
 
-- Hệ thống fit TF-IDF/NMF cục bộ cho từng văn bản; summary trích nguyên câu.
-- Hai biến thể chính khác nhau ở data-fit KL so với Frobenius, còn L1/MMR và cấu hình được ghép cặp trong trang đánh giá.
-- L1 được đưa vào để regularize/khuyến khích factor gọn; tác động phải kiểm tra bằng sparsity và ROUGE.
-- Auto-k là masked positive-entry KL heuristic; score không phải chất lượng summary.
-- MMR greedy cân bằng topic relevance với cosine redundancy; câu cuối được đưa về thứ tự gốc.
-- Trang mô phỏng custom MU, còn fit summary dùng scikit-learn.
+## 24. Những câu hỏi thường gặp và cách trả lời báo cáo
 
-### Không nên nói
+**Không có nhãn thì loss lấy từ đâu?** Từ V của văn bản nguồn và reconstruction WH. Loss là tiêu chí học representation; reference không tham gia fit.
 
-- “Loss là điểm chất lượng summary”, “loss thấp thì ROUGE cao”, hoặc so trị số KL trực tiếp với Frobenius.
-- “L1 làm topic chắc chắn rõ/độc quyền”, “W/H là xác suất”, hoặc “weight lớn luôn xấu”. Alpha quá lớn cũng có thể xóa tín hiệu.
-- “k được chứng minh tối ưu”, “k bằng số câu summary”, hoặc “k search tối ưu cho Frobenius/ROUGE”.
-- “KL chắc chắn tốt hơn cho TF-IDF”, “đã tái hiện nguyên paper”, hoặc “hệ thống đã thắng baseline” khi chưa có benchmark hợp lệ.
-- “Trang mô phỏng là trace sklearn production” hoặc “Global model đã bị xóa hoàn toàn”.
-- “Ablation web với một bài và nhiều seed đại diện cho cả corpus”.
+**Loss thấp có làm chọn câu tốt hơn không?** Có thể giúp representation khớp dữ liệu theo objective, nhưng sentence score còn do relevance/MMR. Không có quan hệ bắt buộc với ROUGE.
 
-## 16. Câu hỏi thường gặp khi báo cáo
+**L1 phạt mạnh khi ma trận thưa?** L1 phạt tổng độ lớn. Nhiều weight giảm về 0 thường làm penalty nhỏ đi; số zero tự nó không phải đại lượng trong công thức L1.
 
-**Không có nhãn thì loss lấy ở đâu?** Từ `V` và `WH` của NMF. Đây là objective nội bộ không giám sát; reference chỉ cần khi tính ROUGE.
+**Tại sao không để W/H lớn?** Weight lớn không tự sai; factorization có scale ambiguity. Regularization tạo trade-off với data fit, không phải quy tắc mọi weight phải nhỏ nhất có thể.
 
-**Tại sao dùng hai loss?** Để kiểm tra cách đo sai số phân rã có làm thay đổi factor và câu được chọn thế nào; không có loss tốt nhất cho mọi dữ liệu. So đầu ra bằng cùng reference/cấu hình.
+**k có phải số ý thật của bài?** Không nhất thiết. Nó là số thành phần được yêu cầu; selector hiện chọn theo masked positive-entry reconstruction, không theo nhãn ý chính.
 
-**Tại sao L1?** Để phạt tổng độ lớn factor và khuyến khích ít trọng số hoạt động hơn; không phải vì mọi trọng số lớn đều sai.
+**Bấm nhiều lần sao loss/score k không đổi?** Trang Tóm tắt dùng core seed=42; cùng text/config/software thường cho cùng kết quả. Đó là tính chạy lại, không tự chứng minh có cache hoặc lỗi.
 
-**Tại sao k ở các trang từng khác nhau?** Trước đây có thể chạy chính sách khác nhau hoặc nhập tay. Code hiện dùng chung selector masked-KL khi `k` bỏ trống. Nếu người dùng nhập k, đó là cấu hình yêu cầu, không phải auto optimum.
+**Vì sao các câu có relevance gần bằng nhau?** Công thức dùng phân bố W theo hàng và salience; cùng phân bố hoặc salience gần đều cho score gần bằng nhau. k=1 thường làm rõ hiện tượng này.
 
-**MMR redundancy có bắt buộc trùng topic không?** Không. Hiện code lấy cosine TF-IDF cao nhất với bất kỳ câu đã chọn nào, không lọc theo dominant topic.
+**Redundancy chỉ so câu vừa chọn hay phải cùng topic?** Nó lấy max cosine với mọi câu trong tập đã chọn, không lọc theo topic.
 
-**Kết quả dự án đã chứng minh phương pháp nào thắng chưa?** Chưa. Split benchmark đang rỗng; cần dữ liệu có reference, validation để chọn cấu hình, test độc lập để báo cáo.
+**ROUGE càng cao càng tốt?** Tốt hơn về overlap với reference theo metric đó. Cần kiểm tra source, semantics và coherence để đánh giá chất lượng đầy đủ hơn.
 
-## 17. Tài liệu và mã nguồn tham khảo
+**Giữ cùng alpha để so KL/Frobenius đã hoàn toàn công bằng chưa?** Đó là cách kiểm soát tham số cho một cặp chạy. Hai losses có scale khác nhau; muốn đánh giá method nói chung cần cùng protocol tuning/test và cùng ngân sách summary.
 
-- [Scikit-learn: NMF API và objective](https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.NMF.html): beta loss, MU, alpha scaling, L1/L2, initialization.
-- [Lee & Seung, Algorithms for Non-negative Matrix Factorization (NeurIPS 2000)](https://proceedings.neurips.cc/paper/2000/hash/f9d1152547c0bde01830b7e8bd60024c-Abstract.html): nền tảng thuật toán cập nhật NMF.
-- [Carbonell & Goldstein, The Use of MMR (SIGIR 1998)](https://doi.org/10.1145/290941.291025): relevance-diversity reranking.
-- [Lin, ROUGE (ACL 2004)](https://aclanthology.org/W04-1013/): metric overlap cho đánh giá tóm tắt.
-- [Aghdam, Automatic Extractive and Generic Document Summarization Based on NMF (2023)](../aghdam_automative.pdf): NMFTS/pairwise sentence regularization; tài liệu paper trong repo.
-- [Wang et al., Multi-Document Summarization via Sentence-Level Semantic Analysis and Symmetric Matrix Factorization (SIGIR 2008)](../1390334.1390387.pdf): sentence similarity, symmetric NMF và chọn đại diện.
-- [Park & An, Automatic Query-based Personalized Summarization using PRF with NMF](../2108616.2108690.pdf): query-focused summarization và pseudo-relevance feedback.
-- [Ghi chú phương pháp/paper của dự án](PAPER_METHODS_AND_EXPERIMENTS.md), [lịch sử cải tiến](NMF_IMPROVEMENTS.md), [thiết kế ablation L1](ABLATION_L1.md).
+**Có thể nói đã tái hiện paper không?** Chỉ khi implementation và evaluation protocol khớp paper. Hiện nên nói sử dụng nền tảng NMF/MMR và một số ý tưởng paper-inspired.
 
-Các paper trên giúp đặt bối cảnh; code hiện tại chỉ có một số ý tưởng paper-inspired. Cần đối chiếu dữ liệu, objective, preprocessing và protocol gốc trước khi gọi một nhánh là tái hiện paper.
+**Câu kết luận phù hợp cho báo cáo hiện tại:** “TopicSum đã xây dựng pipeline Local NMF để biểu diễn câu, chọn summary bằng MMR, cùng giao diện mô phỏng/ROUGE/ablation. Các ví dụ cho thấy hệ thống chạy và có thể phân tích quyết định; hiệu quả tổng quát cần được đánh giá trên corpus có reference độc lập.”
+
+## Phụ lục: công thức MU cho người muốn đọc sâu hơn
+
+Đây là công thức dạng không mask, pure L1 dùng để đọc custom implementation. Đặt `a=alpha_W×n_terms`, `b=alpha_H×n_sentences`; `⊙` và dấu chia là theo từng phần tử, còn `@` là nhân ma trận.
+
+Frobenius:
+
+```text
+H ← H ⊙ (Wᵀ @ V) / (Wᵀ @ W @ H + b + eps)
+W ← W ⊙ (V @ Hᵀ) / (W @ H @ Hᵀ + a + eps)
+```
+
+KL, với ma trận toàn 1 có cùng shape V:
+
+```text
+H ← H ⊙ [Wᵀ @ (V / (W@H))] / [Wᵀ @ 1 + b + eps]
+Tính lại W@H sau bước H
+W ← W ⊙ [(V / (W@H)) @ Hᵀ] / [1 @ Hᵀ + a + eps]
+```
+
+Khi trộn L2, mẫu số còn có thành phần tỷ lệ với H hoặc W theo công thức trong `fit_nmf`. Khi chọn k có mask, chỉ các ô training được dùng trong data-fit/update. Các công thức trên giúp hiểu vai trò dữ liệu và penalty, không phải cam kết trace sklearn giống từng hệ số của custom code.
+
+## Tài liệu tham khảo và nơi đọc tiếp
+
+- [Scikit-learn NMF](https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.NMF.html): API của estimator; trạng thái project nên đối chiếu với phiên bản cài đặt.
+- [Scikit-learn TfidfVectorizer](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html): TF-IDF và các tham số vector hóa.
+- [Lee & Seung, Algorithms for Non-negative Matrix Factorization](https://proceedings.neurips.cc/paper/2000/hash/f9d1152547c0bde01830b7e8bd60024c-Abstract.html).
+- [Carbonell & Goldstein, MMR](https://doi.org/10.1145/290941.291025).
+- [Lin, ROUGE](https://aclanthology.org/W04-1013/).
+- [Aghdam, NMFTS](../aghdam_automative.pdf).
+- [Wang et al., semantic analysis và symmetric matrix factorization](../1390334.1390387.pdf).
+- [Park & An, PRF với NMF](../2108616.2108690.pdf).
+- [Lịch sử cải tiến](NMF_IMPROVEMENTS.md), [mapping paper/protocol](PAPER_METHODS_AND_EXPERIMENTS.md), [thiết kế ablation](ABLATION_L1.md).
+- [Hướng dẫn làm slide](SLIDE_REPORT_GUIDE.md): dàn ý chuyển kiến thức trong cẩm nang thành nội dung báo cáo.
