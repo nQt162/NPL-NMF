@@ -6,11 +6,16 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 
+# Shared local representation for the simulator, summarizer, and evaluations.
+LOCAL_TFIDF_NGRAM_RANGE = (1, 2)
+LOCAL_TFIDF_MAX_FEATURES = 800
+
+
 def fit_sentence_vectorizer(
     processed_sentences: list[str],
     *,
-    ngram_range: tuple[int, int] = (1, 1),
-    max_features: int | None = None,
+    ngram_range: tuple[int, int] = LOCAL_TFIDF_NGRAM_RANGE,
+    max_features: int | None = LOCAL_TFIDF_MAX_FEATURES,
 ) -> tuple[np.ndarray, list[str], TfidfVectorizer | None]:
     """Fit local TF-IDF and return its matrix, feature names, and fitted model."""
     if not processed_sentences:
@@ -38,8 +43,8 @@ def fit_sentence_vectorizer(
 def vectorize_sentences(
     processed_sentences: list[str],
     *,
-    ngram_range: tuple[int, int] = (1, 1),
-    max_features: int | None = None,
+    ngram_range: tuple[int, int] = LOCAL_TFIDF_NGRAM_RANGE,
+    max_features: int | None = LOCAL_TFIDF_MAX_FEATURES,
 ) -> tuple[np.ndarray, list[str]]:
     """Return V and its feature names; empty vocabularies become n-by-0 V."""
     matrix, terms, _ = fit_sentence_vectorizer(

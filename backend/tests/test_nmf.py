@@ -6,7 +6,10 @@ from app.core.nmf import (
     SPARSE_KL_ALPHA_W,
     SPARSE_KL_L1_RATIO,
     SPARSE_KL_LOSS_NAME,
+    K_SELECTION_METHOD_HEURISTIC,
+    K_SELECTION_METHOD_MASKED,
     fit_nmf,
+    select_k_by_imputation,
 )
 
 
@@ -62,6 +65,39 @@ def test_nmf_can_trace_sparse_kl_loss() -> None:
     assert result.snapshots[-1].loss != pytest.approx(
         0.5 * np.sum((V - result.snapshots[-1].WH) ** 2)
     )
+
+
+def test_frobenius_trace_supports_l1_regularization() -> None:
+    V = np.array([[1.0, 0.1, 0.0], [0.9, 0.2, 0.0], [0.0, 0.3, 1.0]])
+    result = fit_nmf(V, k=2, max_iter=8, trace=True, alpha_w=0.1, alpha_h=0.1)
+    assert result.snapshots[-1].regularization_loss > 0
+    assert result.snapshots[-1].loss == pytest.approx(
+        result.snapshots[-1].data_loss + result.snapshots[-1].regularization_loss
+    )
+
+
+def test_k_selector_discloses_heuristic_when_positive_data_is_too_sparse() -> None:
+    V = np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, 0.0]])
+    k, candidates, method = select_k_by_imputation(V, max_k=10)
+    assert k == 2
+    assert candidates == [{"k": 2, "score": None}]
+    assert method == K_SELECTION_METHOD_HEURISTIC
+
+
+def test_k_selector_scores_feasible_k_from_one() -> None:
+    V = np.array([
+        [1.0, 0.2, 0.0, 0.0],
+        [0.8, 0.1, 0.1, 0.0],
+        [0.0, 0.1, 0.9, 0.2],
+        [0.0, 0.0, 0.8, 1.0],
+    ])
+    k, candidates, method = select_k_by_imputation(
+        V, seed=4, max_k=3, n_trials=2, max_iter=8
+    )
+    assert method == K_SELECTION_METHOD_MASKED
+    assert sorted(candidate["k"] for candidate in candidates) == [1, 2, 3]
+    assert all(candidate["score"] is not None for candidate in candidates)
+    assert k in (1, 2, 3)
 
 
 @pytest.mark.parametrize("matrix", [

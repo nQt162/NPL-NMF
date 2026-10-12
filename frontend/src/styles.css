@@ -189,6 +189,9 @@ textarea::placeholder, input::placeholder { color: #a0b1ab; }
 .subheading small { color: #899995; font-size: 10px; text-align: right; }
 .topic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
 .topic-card { padding: 19px; }
+.topic-examples { border-top: 1px solid #e7eee9; margin-top: 15px; padding-top: 12px; }
+.topic-examples .panel-label { display: block; margin-bottom: 8px; }
+.topic-examples p { color: #506763; font-size: 11px; line-height: 1.55; margin: 7px 0 0; }
 .topic-label { display: flex; justify-content: space-between; color: #438278; align-items: start; }
 .topic-label span { font-size: 10px; font-weight: 800; letter-spacing: 1.6px; }
 .topic-label strong { font-family: "Lora", serif; color: #d5e6dd; font-size: 35px; font-weight: 500; line-height: .8; }
@@ -204,6 +207,10 @@ textarea::placeholder, input::placeholder { color: #a0b1ab; }
 .sentence-card p { margin: 13px 0 15px; color: #294248; line-height: 1.62; font-size: 13px; }
 .score-list { display: flex; flex-wrap: wrap; gap: 7px 18px; border-top: 1px solid #e7eee9; padding-top: 11px; color: #8b9a99; font-size: 10px; }
 .score-list strong { color: #476565; margin-left: 2px; }
+.selection-trace { padding: 18px; }
+.selection-trace > summary { color: #164c4a; cursor: pointer; font-family: var(--font-display); font-size: 17px; }
+.trace-round { border-top: 1px solid #e7eee9; margin-top: 15px; padding-top: 9px; }
+.trace-round h4 { color: #315b57; font-size: 12px; margin: 6px 0 10px; }
 
 .evaluation-overview { padding: 24px 27px; background: #eaf3ed; display: flex; justify-content: space-between; gap: 20px; align-items: center; }
 .evaluation-overview h3 { margin: 9px 0 8px; font-family: "Lora", serif; font-size: 31px; font-weight: 500; }
@@ -245,37 +252,71 @@ textarea::placeholder, input::placeholder { color: #a0b1ab; }
 .demo-scores > div { background: #edf6ed; padding: 13px 9px; text-align: center; border-radius: 7px; }
 .demo-scores span { display: block; color: #6a8982; font-size: 9px; font-weight: 800; }
 .demo-scores strong { display: block; margin-top: 5px; color: #1a776c; font-family: "Lora", serif; font-size: 23px; font-weight: 500; }
+.evaluation-k { margin: 0 0 2px; color: #68817c; font-size: 11px; font-weight: 700; }
+.evaluation-candidate { border-top: 1px solid #e4ede5; margin-top: 16px; padding-top: 14px; }
+.evaluation-candidate h3 { margin: 0 0 10px; color: #284f4c; font-size: 13px; }
+.evaluation-summary { margin: 12px 0 0; color: #536b68; font-family: "Lora", serif; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .demo-method-meta { display: grid; gap: 6px; margin-top: 16px; color: #70827e; font-size: 11px; overflow-wrap: anywhere; }
 .demo-method-meta span:first-child { color: #287b70; font-weight: 800; }
 .demo-summary { margin-top: 25px; padding-top: 19px; border-top: 1px solid #e4ede5; }
 .demo-summary p { color: #2b4c4b; font-family: "Lora", serif; font-size: 17px; line-height: 1.65; }
 .demo-note { color: #91a19b; font-size: 10px; line-height: 1.6; margin-top: auto; }
-.comparison-overview { padding: 24px 27px; background: #edf5ef; display: flex; justify-content: space-between; gap: 22px; align-items: center; }
-.comparison-overview h3 { margin: 8px 0 8px; font-family: "Lora", serif; font-size: 30px; font-weight: 500; }
-.comparison-overview p { max-width: 680px; color: #617675; margin: 0; font-size: 12px; line-height: 1.65; }
-.comparison-score { min-width: 145px; text-align: right; }
-.comparison-score span { display: block; color: #197d70; font-family: "Lora", serif; font-size: 43px; line-height: 1; }
-.comparison-score small { color: #7b928d; font-size: 10px; font-weight: 800; letter-spacing: .8px; }
-.compare-diff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.compare-diff-card { padding: 18px 20px; }
-.compare-diff-card strong { display: block; margin: 10px 0 8px; color: #1c766a; font-family: "Lora", serif; font-size: 30px; font-weight: 500; }
-.compare-diff-card p { margin: 0; color: #708280; font-size: 12px; line-height: 1.6; }
-.compare-method-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
-.compare-method-card { padding: 24px; border-top: 4px solid #9bcbbb; }
-.compare-method-card.is-global { border-top-color: #f0b467; }
-.compare-method-card.is-local { border-top-color: #219985; }
-.compare-method-card blockquote { margin: 0 0 18px; color: #253d43; font-family: "Lora", serif; font-size: 20px; line-height: 1.58; }
-.compare-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 17px; }
-.compare-meta-grid span { background: #f1f6f1; color: #78908a; border-radius: 7px; padding: 9px 10px; font-size: 10px; font-weight: 800; }
-.compare-meta-grid strong { display: block; color: #1d6f66; margin-top: 5px; font-size: 12px; overflow-wrap: anywhere; }
-.compare-note { margin: 0 0 17px; padding: 10px 11px; background: #fff7e8; border: 1px solid #f0dbb3; border-radius: 8px; color: #946822; font-size: 11px; line-height: 1.5; }
-.compare-selection-list { margin: 0 0 18px; padding-left: 20px; color: #314b4f; font-size: 12px; line-height: 1.7; }
-.compare-selection-list li { padding: 4px 0; }
-.compact-topic-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-.topic-mini { padding: 12px; border: 1px solid #e4ebe6; border-radius: 10px; background: #fbfdfb; }
-.topic-mini strong { display: block; color: #34796e; font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
-.topic-mini .term-list { margin-top: 11px; }
 .site-footer { max-width: 1420px; margin: 60px auto 0; padding: 22px 0 30px; border-top: 1px solid #dbe4dc; display: flex; justify-content: space-between; gap: 10px; color: #94a49e; font-size: 10px; letter-spacing: .8px; }
+
+.ablation-configs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0 0 18px; }
+.ablation-config { min-width: 0; padding: 14px 15px; border: 1px solid #e0e7e2; border-top: 3px solid #75b9a6; border-radius: 8px; background: #fff; display: grid; gap: 5px; }
+.ablation-config.is-baseline { border-top-color: #e4a957; }
+.ablation-config > span { color: #98aaa2; font-size: 9px; font-weight: 800; }
+.ablation-config strong { color: #285350; font-size: 12px; }
+.ablation-config small { color: #82948d; font-size: 9px; overflow-wrap: anywhere; }
+.ablation-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(270px, .8fr); gap: 18px; align-items: stretch; }
+.ablation-form .field-hint { display: block; margin-bottom: 14px; }
+.ablation-inputs { display: grid; gap: 13px; margin-bottom: 8px; }
+.ablation-inputs .field-group input, .ablation-inputs .field-group textarea { display: block; margin-top: 7px; }
+.ablation-textarea { min-height: 210px; }
+.ablation-reference { min-height: 120px; }
+.ablation-input-hint code, .ablation-result-notes code { background: #edf3ee; padding: 2px 4px; border-radius: 3px; }
+.ablation-fields { margin: 15px 0 20px; }
+.ablation-fields .field-group select { height: 41px; padding: 0 11px; }
+.ablation-seeds { grid-column: 1 / -1; }
+.ablation-method { min-height: 100%; }
+.ablation-equation { padding: 23px 12px; color: #1a5660; background: #eff5ef; border-radius: 8px; text-align: center; font-family: "Lora", serif; font-size: 23px; }
+.ablation-equation sub { font-size: 13px; }
+.ablation-method ul { margin: 15px 0 18px; padding-left: 18px; color: #647a76; font-size: 11px; line-height: 1.65; }
+.ablation-method li + li { margin-top: 9px; }
+.ablation-job { padding: 17px 20px; margin-top: 18px; }
+.ablation-job-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.ablation-job-top > div { display: grid; gap: 5px; }
+.ablation-job-top strong { color: #285350; font-size: 14px; }
+.ablation-job-top > span { color: #778e86; font-size: 11px; }
+.ablation-job progress { display: block; width: 100%; height: 8px; margin-top: 13px; accent-color: #218b7d; }
+.ablation-results { margin-top: 24px; }
+.ablation-downloads { display: flex; flex-wrap: wrap; gap: 7px; }
+.ablation-downloads a { padding: 8px 10px; color: #176d62; background: #e8f3ec; border: 1px solid #cfe2d6; border-radius: 6px; font-size: 10px; font-weight: 800; text-decoration: none; }
+.ablation-downloads a:hover { background: #d7ecdf; }
+.ablation-table-panel { min-width: 0; }
+.ablation-table { min-width: 1370px; }
+.ablation-table tbody th { white-space: normal; min-width: 150px; }
+.ablation-row-label { display: block; color: #285350; }
+.ablation-table tbody th small { display: block; margin-top: 4px; color: #8a9a94; font-size: 9px; font-weight: 400; }
+.ablation-baseline-row { background: #fffaf0; }
+.ablation-delta { color: #23786c !important; font-weight: 800; }
+.ablation-result-notes { display: grid; gap: 5px; color: #758781; font-size: 11px; line-height: 1.6; }
+.ablation-result-notes p { margin: 0; }
+
+@media (max-width: 1100px) {
+  .ablation-configs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ablation-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 540px) {
+  .ablation-configs { grid-template-columns: 1fr 1fr; }
+  .ablation-config { padding: 11px; }
+  .ablation-config strong { font-size: 11px; }
+  .ablation-job-top { align-items: flex-start; flex-direction: column; }
+  .ablation-downloads { width: 100%; }
+  .ablation-downloads a { flex: 1 1 auto; text-align: center; }
+}
 
 @media (max-width: 1100px) {
   .app-shell { grid-template-columns: 225px minmax(0, 1fr); }
@@ -302,7 +343,6 @@ textarea::placeholder, input::placeholder { color: #a0b1ab; }
   .matrix-grid { grid-template-columns: 1fr; }
   .insight-panel { min-height: 0; }
   .insight-foot { margin-top: 0; }
-  .compare-method-grid, .compare-diff-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 540px) {
@@ -317,9 +357,6 @@ textarea::placeholder, input::placeholder { color: #a0b1ab; }
   .advanced-settings .three-cols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .evaluation-overview { display: block; }
   .evaluation-overview-side { margin-top: 20px; align-items: flex-start; }
-  .comparison-overview { display: block; }
-  .comparison-score { text-align: left; margin-top: 18px; }
-  .compare-meta-grid { grid-template-columns: 1fr; }
   .batch-stats { grid-template-columns: 1fr; }
   .site-footer { display: block; line-height: 1.8; }
   .site-footer span { display: block; }

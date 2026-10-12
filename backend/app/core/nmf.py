@@ -13,14 +13,17 @@ LossName = Literal["frobenius", "kullback-leibler"]
 
 SPARSE_KL_LOSS_NAME: LossName = "kullback-leibler"
 SPARSE_KL_SOLVER = "mu"
-SPARSE_KL_ALPHA_W = 0.1
-SPARSE_KL_ALPHA_H = 0.1
+SPARSE_KL_ALPHA_W = 0.001
+SPARSE_KL_ALPHA_H = 0.001
 SPARSE_KL_L1_RATIO = 1.0
 SPARSE_KL_MAX_ITER = 500
-K_SELECTION_MAX_K = 6
-K_SELECTION_TRIALS = 3
+K_SELECTION_MAX_K = 10
+K_SELECTION_TRIALS = 10
 K_SELECTION_VALIDATION_FRACTION = 0.2
 K_SELECTION_MAX_ITER = 120
+K_SELECTION_METHOD_MASKED = "positive_entry_masked_kl_cv"
+K_SELECTION_METHOD_HEURISTIC = "heuristic_low_observations"
+K_SELECTION_METHOD_SINGLE = "single_feasible_k"
 
 
 @dataclass(frozen=True)
@@ -211,6 +214,8 @@ def fit_nmf(
     )
 
     rank = min(k, *V.shape)
+    scaled_alpha_w = alpha_w * V.shape[1]
+    scaled_alpha_h = alpha_h * V.shape[0]
     rng = np.random.default_rng(seed)
     W = rng.random((V.shape[0], rank)) + EPS
     H = rng.random((rank, V.shape[1])) + EPS
@@ -221,8 +226,8 @@ def fit_nmf(
             W,
             H,
             loss=loss,
-            alpha_w=alpha_w,
-            alpha_h=alpha_h,
+            alpha_w=scaled_alpha_w,
+            alpha_h=scaled_alpha_h,
             l1_ratio=l1_ratio,
             mask=mask,
         )
@@ -233,12 +238,24 @@ def fit_nmf(
         if loss == "frobenius" and mask is not None:
             V_masked = mask * V
             WH_masked = mask * (W @ H)
-            H *= (W.T @ V_masked) / (W.T @ WH_masked + EPS)
+            h_penalty = scaled_alpha_h * (
+                l1_ratio + (1.0 - l1_ratio) * H
+            )
+            H *= (W.T @ V_masked) / (W.T @ WH_masked + h_penalty + EPS)
             WH_masked = mask * (W @ H)
-            W *= (V_masked @ H.T) / (WH_masked @ H.T + EPS)
+            w_penalty = scaled_alpha_w * (
+                l1_ratio + (1.0 - l1_ratio) * W
+            )
+            W *= (V_masked @ H.T) / (WH_masked @ H.T + w_penalty + EPS)
         elif loss == "frobenius":
-            H *= (W.T @ V) / (W.T @ W @ H + EPS)
-            W *= (V @ H.T) / (W @ H @ H.T + EPS)
+            h_penalty = scaled_alpha_h * (
+                l1_ratio + (1.0 - l1_ratio) * H
+            )
+            H *= (W.T @ V) / (W.T @ W @ H + h_penalty + EPS)
+            w_penalty = scaled_alpha_w * (
+                l1_ratio + (1.0 - l1_ratio) * W
+            )
+            W *= (V @ H.T) / (W @ H @ H.T + w_penalty + EPS)
         else:
             WH = np.maximum(W @ H, EPS)
             ratio = V / WH
@@ -249,8 +266,8 @@ def fit_nmf(
                 h_denominator = W.sum(axis=0)[:, np.newaxis]
             h_denominator = (
                 h_denominator
-                + alpha_h * l1_ratio
-                + alpha_h * (1.0 - l1_ratio) * H
+                + scaled_alpha_h * l1_ratio
+                + scaled_alpha_h * (1.0 - l1_ratio) * H
             )
             H *= (W.T @ ratio) / (h_denominator + EPS)
 
@@ -263,8 +280,8 @@ def fit_nmf(
                 w_denominator = H.sum(axis=1)[np.newaxis, :]
             w_denominator = (
                 w_denominator
-                + alpha_w * l1_ratio
-                + alpha_w * (1.0 - l1_ratio) * W
+                + scaled_alpha_w * l1_ratio
+                + scaled_alpha_w * (1.0 - l1_ratio) * W
             )
             W *= (ratio @ H.T) / (w_denominator + EPS)
 
@@ -275,8 +292,8 @@ def fit_nmf(
                 W,
                 H,
                 loss=loss,
-                alpha_w=alpha_w,
-                alpha_h=alpha_h,
+                alpha_w=scaled_alpha_w,
+                alpha_h=scaled_alpha_h,
                 l1_ratio=l1_ratio,
                 mask=mask,
             )
@@ -288,8 +305,8 @@ def fit_nmf(
                 W,
                 H,
                 loss=loss,
-                alpha_w=alpha_w,
-                alpha_h=alpha_h,
+                alpha_w=scaled_alpha_w,
+                alpha_h=scaled_alpha_h,
                 l1_ratio=l1_ratio,
                 mask=mask,
             ).total
@@ -310,27 +327,24 @@ def select_k_by_imputation(
     n_trials: int = K_SELECTION_TRIALS,
     validation_fraction: float = K_SELECTION_VALIDATION_FRACTION,
     max_iter: int = K_SELECTION_MAX_ITER,
-    loss: LossName = SPARSE_KL_LOSS_NAME,
-    alpha_w: float = SPARSE_KL_ALPHA_W,
-    alpha_h: float = SPARSE_KL_ALPHA_H,
-    l1_ratio: float = SPARSE_KL_L1_RATIO,
-) -> tuple[int, list[dict]]:
-    """Select k by masking positive TF-IDF entries and imputing them with NMF."""
+) -> tuple[int, list[dict], str]:
+    """Choose k by positive-entry masked KL CV, or disclose a low-data heuristic."""
     V = np.asarray(V, dtype=float)
     if V.ndim != 2 or not all(V.shape) or np.any(V < 0) or not np.all(np.isfinite(V)):
         raise ValueError("V phải là ma trận 2 chiều không rỗng, hữu hạn và không âm")
+    if max_k < 1 or n_trials < 1 or not 0 < validation_fraction < 1:
+        raise ValueError("max_k and n_trials must be positive; validation_fraction must be in (0, 1)")
     upper = min(max_k, V.shape[0], V.shape[1])
-    lower = 2 if V.shape[0] >= 4 and V.shape[1] >= 2 else 1
-    if upper <= 1 or upper < lower:
-        return 1, [{"k": 1, "score": 0.0}]
+    if upper <= 1:
+        return 1, [{"k": 1, "score": None}], K_SELECTION_METHOD_SINGLE
 
     positive_positions = np.argwhere(V > 0)
     if len(positive_positions) < 4:
-        heuristic = max(lower, min(upper, V.shape[0] // 2))
-        return heuristic, [{"k": heuristic, "score": 0.0}]
+        heuristic = min(upper, max(1, V.shape[0] // 2))
+        return heuristic, [{"k": heuristic, "score": None}], K_SELECTION_METHOD_HEURISTIC
 
     rng = np.random.default_rng(seed)
-    candidates = list(range(lower, upper + 1))
+    candidates = list(range(1, upper + 1))
     scores: dict[int, list[float]] = {candidate: [] for candidate in candidates}
     validation_count = max(1, int(round(len(positive_positions) * validation_fraction)))
 
@@ -349,27 +363,26 @@ def select_k_by_imputation(
                 seed=seed + trial * 997 + candidate,
                 max_iter=max_iter,
                 mask=train_mask,
-                loss=loss,
-                alpha_w=alpha_w,
-                alpha_h=alpha_h,
-                l1_ratio=l1_ratio,
+                loss=SPARSE_KL_LOSS_NAME,
+                alpha_w=0.0,
+                alpha_h=0.0,
+                l1_ratio=1.0,
             )
             reconstruction = np.maximum(result.W @ result.H, EPS)
             observed = V[rows, cols]
             predicted = reconstruction[rows, cols]
             kl_errors = observed * np.log((observed + EPS) / predicted) - observed + predicted
-            complexity_penalty = 1e-4 * candidate / upper
-            scores[candidate].append(float(np.mean(kl_errors) + complexity_penalty))
+            scores[candidate].append(float(np.mean(kl_errors)))
 
     ranked = [
         {"k": candidate, "score": float(np.mean(values))}
         for candidate, values in scores.items()
     ]
     ranked.sort(key=lambda item: (item["score"], item["k"]))
-    return int(ranked[0]["k"]), ranked
+    return int(ranked[0]["k"]), ranked, K_SELECTION_METHOD_MASKED
 
 
 def auto_select_k(V: np.ndarray, max_k: int = K_SELECTION_MAX_K, seed: int = 42) -> int:
     """Backward-compatible k selector using masked KL imputation."""
-    selected, _ = select_k_by_imputation(V, seed=seed, max_k=max_k)
+    selected, _, _ = select_k_by_imputation(V, seed=seed, max_k=max_k)
     return selected

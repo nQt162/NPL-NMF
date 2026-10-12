@@ -15,11 +15,8 @@ from app.core.compare import summarize_global_text
 from app.core.evaluate import rouge_f1
 from app.core.sentences import split_sentences
 from app.core.summarize import (
-    DEFAULT_PAIRWISE_LAMBDA,
-    DEFAULT_QUERY_WEIGHT,
+    METHOD_FROBENIUS,
     METHOD_LOCAL_KL,
-    METHOD_NMFTS,
-    METHOD_SNMF,
     summarize,
 )
 
@@ -55,12 +52,10 @@ def _run_method(
     *,
     k: int | None,
     summary_sentences: int,
-    pairwise_lambda: float,
     mmr_lambda: float,
     alpha_w: float,
     alpha_h: float,
     l1_ratio: float,
-    query_weight: float,
     seed: int,
 ) -> dict[str, Any]:
     text = article["article"]
@@ -75,26 +70,17 @@ def _run_method(
             summary_sentences=budget,
             topic_count=k or 3,
         )
-    if method == "Query PRF" and not str(article.get("query", "")).strip():
-        raise ValueError("bài thiếu trường query; bỏ qua phương pháp Query PRF")
-
     request: dict[str, Any] = {
         "text": text,
         "k": k,
         "summary_sentences": budget,
         "seed": seed,
-        "method": METHOD_LOCAL_KL,
+        "method": METHOD_FROBENIUS if method == "Local Frobenius+L1+MMR" else METHOD_LOCAL_KL,
         "mmr_lambda": mmr_lambda,
         "alpha_w": alpha_w,
         "alpha_h": alpha_h,
         "l1_ratio": l1_ratio,
     }
-    if method == "NMFTS pairwise":
-        request.update(method=METHOD_NMFTS, pairwise_lambda=pairwise_lambda)
-    elif method == "SNMF graph":
-        request.update(method=METHOD_SNMF)
-    elif method == "Query PRF":
-        request.update(query=article["query"], query_weight=query_weight)
     return summarize(**request)
 
 
@@ -104,27 +90,21 @@ def run_experiment(
     *,
     k: int | None = None,
     summary_sentences: int = 3,
-    pairwise_lambda: float = DEFAULT_PAIRWISE_LAMBDA,
     mmr_lambda: float = 0.7,
-    alpha_w: float = 0.1,
-    alpha_h: float = 0.1,
+    alpha_w: float = 0.001,
+    alpha_h: float = 0.001,
     l1_ratio: float = 1.0,
-    query_weight: float = DEFAULT_QUERY_WEIGHT,
     seed: int = 42,
 ) -> dict[str, Any]:
     articles, errors = _read_articles(input_path)
     rows: list[dict[str, Any]] = []
     predictions: list[dict[str, Any]] = []
-    methods = ["Lead-N", "Global NMF", "Local KL+L1+MMR", "NMFTS pairwise", "SNMF graph"]
-    has_query_for_all = bool(articles) and all(
-        str(item.get("query", "")).strip() for item in articles
-    )
-    if has_query_for_all:
-        methods.append("Query PRF")
-    elif any(str(item.get("query", "")).strip() for item in articles):
-        errors.append({
-            "reason": "Query PRF omitted: every article in the comparison split must include a query",
-        })
+    methods = [
+        "Lead-N",
+        "Global NMF",
+        "Local KL+L1+MMR",
+        "Local Frobenius+L1+MMR",
+    ]
 
     for article in articles:
         for method in methods:
@@ -135,12 +115,10 @@ def run_experiment(
                     article,
                     k=k,
                     summary_sentences=summary_sentences,
-                    pairwise_lambda=pairwise_lambda,
                     mmr_lambda=mmr_lambda,
                     alpha_w=alpha_w,
                     alpha_h=alpha_h,
                     l1_ratio=l1_ratio,
-                    query_weight=query_weight,
                     seed=seed,
                 )
                 runtime = perf_counter() - start
@@ -200,16 +178,13 @@ def run_experiment(
             "input": str(input_path),
             "k": k,
             "summary_sentences": summary_sentences,
-            "pairwise_lambda": pairwise_lambda,
             "mmr_lambda": mmr_lambda,
             "alpha_w": alpha_w,
             "alpha_h": alpha_h,
             "l1_ratio": l1_ratio,
-            "query_weight": query_weight,
             "seed": seed,
             "methods": methods,
-            "k_selection": "masked_kl_imputation shared by local KL, NMFTS and SNMF when k is omitted",
-            "query_feedback": "included only when every article in this split has a query",
+            "k_selection": "positive-entry masked KL validation shared by both local NMF objectives when k is omitted",
         },
         "valid_articles": len(articles),
         "errors": errors,
@@ -228,12 +203,10 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("../results"))
     parser.add_argument("--k", type=int, default=None, help="Fixed topic count; omitted uses masked KL imputation")
     parser.add_argument("--summary-sentences", type=int, default=3)
-    parser.add_argument("--pairwise-lambda", type=float, default=DEFAULT_PAIRWISE_LAMBDA)
     parser.add_argument("--mmr-lambda", type=float, default=0.7)
-    parser.add_argument("--alpha-w", type=float, default=0.1)
-    parser.add_argument("--alpha-h", type=float, default=0.1)
+    parser.add_argument("--alpha-w", type=float, default=0.001)
+    parser.add_argument("--alpha-h", type=float, default=0.001)
     parser.add_argument("--l1-ratio", type=float, default=1.0)
-    parser.add_argument("--query-weight", type=float, default=DEFAULT_QUERY_WEIGHT)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     report = run_experiment(
@@ -241,12 +214,10 @@ def main() -> None:
         args.output,
         k=args.k,
         summary_sentences=args.summary_sentences,
-        pairwise_lambda=args.pairwise_lambda,
         mmr_lambda=args.mmr_lambda,
         alpha_w=args.alpha_w,
         alpha_h=args.alpha_h,
         l1_ratio=args.l1_ratio,
-        query_weight=args.query_weight,
         seed=args.seed,
     )
     print(json.dumps(report, ensure_ascii=True, indent=2))

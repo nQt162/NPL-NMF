@@ -3,13 +3,13 @@ import { health } from './api.js';
 import Visualizer from './pages/Visualizer.jsx';
 import Summarizer from './pages/Summarizer.jsx';
 import Evaluation from './pages/Evaluation.jsx';
-import Comparison from './pages/Comparison.jsx';
+import Ablation from './pages/Ablation.jsx';
 
 const pages = [
-  { id: 'visualizer', number: '01', label: 'Mô phỏng NMF', caption: 'KL loss & ma trận' },
+  { id: 'visualizer', number: '01', label: 'Mô phỏng NMF', caption: 'So sánh KL và Frobenius' },
   { id: 'summarizer', number: '02', label: 'Tóm tắt văn bản', caption: 'Chủ đề & câu trích' },
-  { id: 'evaluation', number: '03', label: 'Đánh giá', caption: 'Đối chứng & ROUGE' },
-  { id: 'comparison', number: '04', label: 'So sánh NMF', caption: 'Global vs Local' },
+  { id: 'evaluation', number: '03', label: 'Đánh giá', caption: 'ROUGE-1 / 2 / L' },
+  { id: 'ablation', number: '04', label: 'Ablation L1', caption: 'ROUGE & W/H sparsity' },
 ];
 
 export default function App() {
@@ -57,7 +57,7 @@ export default function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-note"><span className="note-line" />Ba biến thể: Local KL+L1, NMFTS pairwise và SNMF đồ thị.</div>
+          <div className="sidebar-note"><span className="note-line" />Hai biến thể: KL+L1 và Frobenius; cùng MMR khi tóm tắt.</div>
           <div className={`server-status status-${serverStatus}`} aria-live="polite">
             <span className="status-indicator" />
             {serverStatus === 'online' ? 'Backend đang kết nối' : serverStatus === 'offline' ? 'Backend chưa kết nối' : 'Đang kiểm tra backend'}
@@ -87,7 +87,7 @@ export default function App() {
           {active === 'visualizer' && <Visualizer />}
           {active === 'summarizer' && <Summarizer />}
           {active === 'evaluation' && <Evaluation />}
-          {active === 'comparison' && <Comparison />}
+          {active === 'ablation' && <Ablation />}
         </div>
         <footer className="site-footer"><span>TOPICSUM / NPL-NMF</span><span>Giữ nguyên câu gốc · Không sinh văn bản bằng LLM</span></footer>
       </main>

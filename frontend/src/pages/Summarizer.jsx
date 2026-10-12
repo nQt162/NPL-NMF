@@ -2,20 +2,39 @@ import { useState } from 'react';
 import toy from '../../../data/demo/toy.json';
 import { summarize } from '../api.js';
 
-const METHOD_LABELS = {
-  local_kl_mmr: 'Local KL-NMF + L1 + MMR',
-  nmfts_pairwise: 'NMFTS-inspired pairwise KL',
-  snmf: 'SNMF đồ thị câu',
-};
-
 const METHOD_NOTES = {
-  local_kl_mmr: 'Fit TF-IDF và KL-NMF trực tiếp trên văn bản; L1 làm topic thưa, MMR giảm câu trùng lặp.',
-  nmfts_pairwise: 'Frobenius NMF cộng phạt symmetric-KL giữa câu tương tự; chọn câu bằng MMR sau phân rã.',
-  snmf: 'Phân rã đối xứng đồ thị cosine câu, gom cụm và lần lượt chọn câu đại diện.',
+  local_kl_mmr: 'Fit TF-IDF và KL-NMF cục bộ; dùng cùng cấu hình regularization trên W/H và MMR để chọn câu.',
+  local_frobenius_mmr: 'Fit TF-IDF và Frobenius-NMF cục bộ; dùng cùng regularization, k và MMR để đối chiếu riêng hàm mất mát.',
 };
 
 function number(value, digits = 3) {
   return Number(value ?? 0).toFixed(digits);
+}
+
+function candidateScore(value) {
+  return value == null ? 'heuristic' : Number(value).toFixed(5);
+}
+
+function penaltyLabel(ratio) {
+  const value = Number(ratio);
+  if (value === 1) return 'L1';
+  if (value === 0) return 'L2';
+  return 'L1/L2';
+}
+
+function methodLabel(method, ratio) {
+  const family = method === 'local_frobenius_mmr' ? 'Frobenius-NMF' : 'KL-NMF';
+  return `Local ${family} + ${penaltyLabel(ratio)} + MMR`;
+}
+
+function kMethodLabel(method) {
+  return ({
+    positive_entry_masked_kl_cv: 'Positive-entry masked KL CV',
+    heuristic_low_observations: 'Heuristic: ít quan sát dương',
+    single_feasible_k: 'Chỉ một k khả thi',
+    requested: 'k do người dùng nhập',
+    fallback: 'Fallback',
+  })[method] || method;
 }
 
 export default function Summarizer() {
@@ -24,9 +43,8 @@ export default function Summarizer() {
   const [sentenceCount, setSentenceCount] = useState(3);
   const [method, setMethod] = useState('local_kl_mmr');
   const [mmrLambda, setMmrLambda] = useState(0.7);
-  const [pairwiseLambda, setPairwiseLambda] = useState(0.1);
-  const [alphaW, setAlphaW] = useState(0.1);
-  const [alphaH, setAlphaH] = useState(0.1);
+  const [alphaW, setAlphaW] = useState(0.001);
+  const [alphaH, setAlphaH] = useState(0.001);
   const [l1Ratio, setL1Ratio] = useState(1);
   const [query, setQuery] = useState('');
   const [queryWeight, setQueryWeight] = useState(0.5);
@@ -58,7 +76,6 @@ export default function Summarizer() {
         summary_sentences: Number(sentenceCount),
         method,
         mmr_lambda: Number(mmrLambda),
-        pairwise_lambda: Number(pairwiseLambda),
         alpha_w: Number(alphaW),
         alpha_h: Number(alphaH),
         l1_ratio: Number(l1Ratio),
@@ -86,7 +103,6 @@ export default function Summarizer() {
   }
 
   const localMethod = method === 'local_kl_mmr';
-  const usesMmr = method !== 'snmf';
 
   return (
     <section aria-labelledby="summarizer-heading">
@@ -101,16 +117,15 @@ export default function Summarizer() {
 
       <div className="workspace-grid">
         <form className="panel form-panel" onSubmit={handleSubmit}>
-          <div className="panel-top"><span className="panel-label">VĂN BẢN NGUỒN</span><span className="panel-meta">LOCAL / PAPER VARIANTS</span></div>
+          <div className="panel-top"><span className="panel-label">VĂN BẢN NGUỒN</span><span className="panel-meta">LOCAL NMF / TWO OBJECTIVES</span></div>
           <label className="field-label" htmlFor="summarize-text">Nội dung cần tóm tắt</label>
           <textarea id="summarize-text" value={text} onChange={(event) => updateField(setText, event.target.value)} rows={12} placeholder="Dán văn bản tiếng Việt vào đây..." />
           <div className="field-hint"><span>{text.length.toLocaleString('vi-VN')} ký tự</span><button type="button" className="text-button" onClick={() => { setText(toy.text); setResult(null); setError(''); }}>Nạp ví dụ</button></div>
 
           <label className="field-group field-block" htmlFor="summary-method">Phương pháp
             <select id="summary-method" value={method} onChange={(event) => updateField(setMethod, event.target.value)}>
-              <option value="local_kl_mmr">Local KL-NMF + L1 + MMR</option>
-              <option value="nmfts_pairwise">NMFTS-inspired pairwise KL</option>
-              <option value="snmf">SNMF đồ thị câu</option>
+              <option value="local_kl_mmr">Local KL-NMF + shared penalty + MMR</option>
+              <option value="local_frobenius_mmr">Local Frobenius-NMF + shared penalty + MMR</option>
             </select>
           </label>
           <p className="method-description">{METHOD_NOTES[method]}</p>
@@ -129,27 +144,25 @@ export default function Summarizer() {
           <details className="advanced-settings">
             <summary>Tham số thuật toán <span>+</span></summary>
             <div className="form-row two-cols advanced-grid">
-              {usesMmr && <label className="field-group">MMR λ<input type="number" min="0" max="1" step="0.05" value={mmrLambda} onChange={(event) => updateField(setMmrLambda, event.target.value)} /></label>}
-              {method === 'nmfts_pairwise' && <label className="field-group">Pairwise λ<input type="number" min="0" max="10" step="0.05" value={pairwiseLambda} onChange={(event) => updateField(setPairwiseLambda, event.target.value)} /></label>}
-              {localMethod && <>
-                <label className="field-group">α W<input type="number" min="0" max="1" step="0.01" value={alphaW} onChange={(event) => updateField(setAlphaW, event.target.value)} /></label>
-                <label className="field-group">α H<input type="number" min="0" max="1" step="0.01" value={alphaH} onChange={(event) => updateField(setAlphaH, event.target.value)} /></label>
-                <label className="field-group">L1 ratio<input type="number" min="0" max="1" step="0.05" value={l1Ratio} onChange={(event) => updateField(setL1Ratio, event.target.value)} /></label>
-              </>}
+              <label className="field-group">MMR λ<input type="number" min="0" max="1" step="0.05" value={mmrLambda} onChange={(event) => updateField(setMmrLambda, event.target.value)} /></label>
+              <label className="field-group">α W (cả hai loss)<input type="number" min="0" max="1" step="0.0005" value={alphaW} onChange={(event) => updateField(setAlphaW, event.target.value)} /></label>
+              <label className="field-group">α H (cả hai loss)<input type="number" min="0" max="1" step="0.0005" value={alphaH} onChange={(event) => updateField(setAlphaH, event.target.value)} /></label>
+              <label className="field-group">L1 ratio (cả hai)<input type="number" min="0" max="1" step="0.05" value={l1Ratio} onChange={(event) => updateField(setL1Ratio, event.target.value)} /></label>
             </div>
+            <p className="field-hint">L1 ratio 1 = L1; 0 = L2; giá trị giữa trộn hai penalty. Alpha được scale theo kích thước ma trận; nếu penalty làm factor về 0, hệ thống báo fallback.</p>
           </details>
           {error && <div className="alert alert-error" role="alert">{error}</div>}
           <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Đang phân tích...' : 'Tạo bản tóm tắt'}<span aria-hidden="true">→</span></button>
         </form>
 
         <div className="panel insight-panel summarize-insight">
-          <div className="panel-top"><span className="panel-label">PHƯƠNG PHÁP ĐANG CHỌN</span><span className="panel-meta">{METHOD_LABELS[method]}</span></div>
+          <div className="panel-top"><span className="panel-label">PHƯƠNG PHÁP ĐANG CHỌN</span><span className="panel-meta">{methodLabel(method, l1Ratio)}</span></div>
           <p className="method-description method-description-panel">{METHOD_NOTES[method]}</p>
           <div className="process-list">
             <div><span>01</span><p><strong>TF-IDF cục bộ</strong><small>Mỗi câu là một document; vocabulary fit từ văn bản hiện tại.</small></p></div>
-            <div><span>02</span><p><strong>Chọn k</strong><small>Tự chọn bằng masked KL imputation; có thể nhập k cố định.</small></p></div>
-            <div><span>03</span><p><strong>Phân rã riêng objective</strong><small>KL+L1, NMFTS pairwise hoặc SNMF graph không dùng chung loss.</small></p></div>
-            <div><span>04</span><p><strong>Trích xuất câu</strong><small>MMR giảm lặp; SNMF chọn đại diện theo cụm. Câu giữ thứ tự gốc.</small></p></div>
+            <div><span>02</span><p><strong>Chọn k</strong><small>Masked KL CV trên các phần tử TF-IDF dương; heuristic được đánh dấu khi dữ liệu quá ít.</small></p></div>
+            <div><span>03</span><p><strong>Đối chiếu objective</strong><small>Hai loss dùng cùng alpha/L1; khác biệt chính là KL divergence so với Frobenius.</small></p></div>
+            <div><span>04</span><p><strong>Trích xuất câu bằng MMR</strong><small>Cả hai cách dùng cùng ngân sách câu, MMR và giữ thứ tự gốc.</small></p></div>
           </div>
           <div className="insight-foot">TRÍCH XUẤT CÂU GỐC · KHÔNG SINH VĂN BẢN</div>
         </div>
@@ -164,8 +177,8 @@ export default function Summarizer() {
             <div className="result-stats">
               <span>{result.sentence_analysis.length} câu nguồn</span>
               <span>k = {result.k}</span>
-              <span>{METHOD_LABELS[result.method] || result.method}</span>
-              {usesMmr && <span>MMR λ = {number(result.mmr_lambda, 2)}</span>}
+              <span>{methodLabel(result.method, result.l1_ratio)}</span>
+              <span>MMR λ = {number(result.mmr_lambda, 2)}</span>
               <span>{result.solver}</span>
             </div>
           </div>
@@ -174,19 +187,20 @@ export default function Summarizer() {
           {result.loss_value !== null && result.loss_value !== undefined && <div className="panel loss-summary">
             <div><span className="panel-label">OBJECTIVE / {result.loss_name}</span><strong>{number(result.loss_value, 6)}</strong></div>
             {result.data_loss !== null && result.data_loss !== undefined && <div><span>Thành phần tái tạo</span><strong>{number(result.data_loss, 6)}</strong></div>}
-            {result.regularization_loss !== null && result.regularization_loss !== undefined && <div><span>{result.method === 'nmfts_pairwise' ? 'Pairwise penalty' : 'L1 penalty'}</span><strong>{number(result.regularization_loss, 6)}</strong></div>}
+            {result.regularization_loss !== null && result.regularization_loss !== undefined && <div><span>L1 penalty</span><strong>{number(result.regularization_loss, 6)}</strong></div>}
           </div>}
-          {result.k_candidates?.length > 0 && <div className="panel k-panel"><div className="panel-top"><span className="panel-label">ỨNG VIÊN k</span><span className="panel-meta">{result.k_selection_method}</span></div><div className="k-candidates">{result.k_candidates.map((candidate) => <span className={candidate.k === result.k ? 'is-selected' : ''} key={candidate.k}>k={candidate.k}<strong>{Number(candidate.score).toFixed(5)}</strong></span>)}</div><p className="field-hint k-note">Khi tự chọn, masked KL imputation được dùng chung để có cùng chính sách k giữa các biến thể; đây không phải tối ưu riêng objective NMFTS/SNMF.</p></div>}
+          {result.k_candidates?.length > 0 && <div className="panel k-panel"><div className="panel-top"><span className="panel-label">ỨNG VIÊN k</span><span className="panel-meta">{kMethodLabel(result.k_selection_method)}</span></div><div className="k-candidates">{result.k_candidates.map((candidate) => <span className={candidate.k === result.k ? 'is-selected' : ''} key={candidate.k}>k={candidate.k}<strong>{candidateScore(candidate.score)}</strong></span>)}</div><p className="field-hint k-note">Điểm thấp hơn tốt hơn theo positive-entry masked KL CV (k = 1…10). Heuristic không có điểm CV. Đây không phải ROUGE hay điểm chất lượng tóm tắt và không tối ưu riêng cho từng loss.</p></div>}
           <div className="panel summary-card">
             <div className="panel-top"><span className="panel-label">BẢN TÓM TẮT</span><button type="button" className="text-button" onClick={copySummary}>{copied ? 'Đã sao chép' : 'Sao chép'}</button></div>
             <blockquote>{result.summary}</blockquote>
             <div className="summary-caption">Các câu được giữ nguyên từ văn bản nguồn, theo thứ tự xuất hiện.{result.query_feedback_applied && ` Câu pseudo-relevant: ${result.pseudo_relevant_indices.map((index) => index + 1).join(', ')}.`}</div>
           </div>
-          {result.topics.length > 0 && <div className="topic-section"><div className="subheading"><span className="panel-label">TỪ KHÓA THEO CHỦ ĐỀ</span><small>Đại diện từ ma trận factor hoặc cụm câu</small></div><div className="topic-grid">{result.topics.map((topic, index) => <div className="panel topic-card" key={index}><div className="topic-label"><span>CHỦ ĐỀ</span><strong>{String(index + 1).padStart(2, '0')}</strong></div><div className="term-list">{topic.top_terms.map((term) => <span key={term}>{term.replaceAll('_', ' ')}</span>)}</div></div>)}</div></div>}
+          {result.topics.length > 0 && <div className="topic-section"><div className="subheading"><span className="panel-label">TỪ KHÓA ĐẶC TRƯNG THEO CHỦ ĐỀ</span><small>Xếp hạng từ H đã chuẩn hóa và độ độc quyền giữa các chủ đề</small></div><div className="topic-grid">{result.topics.map((topic, index) => <div className="panel topic-card" key={index}><div className="topic-label"><span>CHỦ ĐỀ</span><strong>{String(index + 1).padStart(2, '0')}</strong></div><div className="term-list">{topic.top_terms.map((term) => <span key={term}>{term.replaceAll('_', ' ')}</span>)}</div><div className="topic-examples"><span className="panel-label">CÂU ĐẠI DIỆN</span>{topic.representative_sentences?.map((sentence, sentenceIndex) => <p key={`${index}-${sentenceIndex}`}>{sentence}</p>)}</div></div>)}</div></div>}
           <div className="sentence-section">
             <div className="subheading"><span className="panel-label">PHÂN TÍCH TỪNG CÂU</span><small>{result.selection_method}</small></div>
-            <div className="sentence-list">{result.sentence_analysis.map((item) => <article className={`panel sentence-card ${item.selected ? 'selected' : ''}`} key={item.index}><div className="sentence-card-head"><span className="sentence-no">CÂU {String(item.index + 1).padStart(2, '0')}</span><span className={`sentence-status ${item.selected ? 'is-selected' : ''}`}>{item.selected ? 'ĐƯỢC CHỌN' : 'BỎ QUA'}</span></div><p>{item.text}</p><div className="score-list"><span>Chủ đề <strong>{item.dominant_topic === null ? '-' : item.dominant_topic + 1}</strong></span><span>Relevance <strong>{number(item.relevance)}</strong></span><span>Redundancy <strong>{number(item.redundancy)}</strong></span><span>Điểm chọn <strong>{number(item.score)}</strong></span>{result.query_feedback_applied && <span>Query <strong>{number(item.query_relevance)}</strong></span>}</div></article>)}</div>
+            <div className="sentence-list">{result.sentence_analysis.map((item) => <article className={`panel sentence-card ${item.selected ? 'selected' : ''}`} key={item.index}><div className="sentence-card-head"><span className="sentence-no">CÂU {String(item.index + 1).padStart(2, '0')}</span><span className={`sentence-status ${item.selected ? 'is-selected' : ''}`}>{item.selected ? 'ĐƯỢC CHỌN' : 'BỎ QUA'}</span></div><p>{item.text}</p><div className="score-list"><span>Chủ đề <strong>{item.dominant_topic === null ? '-' : item.dominant_topic + 1}</strong></span><span>Relevance <strong>{number(item.relevance)}</strong></span><span>Redundancy <strong>{number(item.redundancy)}</strong></span><span>Điểm chọn (vòng {item.score_round ?? '-'}) <strong>{number(item.score)}</strong></span>{result.query_feedback_applied && <span>Query <strong>{number(item.query_relevance)}</strong></span>}</div></article>)}</div>
           </div>
+          {result.selection_trace?.length > 0 && <details className="panel selection-trace"><summary>Xem so sánh điểm MMR theo từng vòng</summary><p className="field-hint">Chỉ so sánh các ứng viên trong cùng một vòng: redundancy thay đổi sau mỗi câu được chọn.</p>{result.selection_trace.map((round) => <div className="trace-round" key={round.round}><h4>Vòng {round.round}: chọn câu {round.selected_index + 1}</h4><div className="table-scroll"><table className="data-table"><thead><tr><th>Câu</th><th>Relevance</th><th>Redundancy</th><th>MMR</th></tr></thead><tbody>{round.candidates.map((candidate) => <tr key={candidate.index} className={candidate.index === round.selected_index ? 'ablation-baseline-row' : ''}><th scope="row">Câu {candidate.index + 1}</th><td>{number(candidate.relevance)}</td><td>{number(candidate.redundancy)}</td><td>{number(candidate.score)}</td></tr>)}</tbody></table></div></div>)}</details>}
         </div>
       )}
     </section>

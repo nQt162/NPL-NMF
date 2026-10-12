@@ -39,6 +39,9 @@ function post(path, body) {
 export const health = () => request('/health');
 export const simulate = (body) => post('/api/simulate', body);
 export const summarize = (body) => post('/api/summarize', body);
-export const compareGlobalLocal = (body) => post('/api/compare-global-local', body);
 export const evaluate = (body) => post('/api/evaluate', body);
 export const loadBatchMetrics = () => request('/api/experiment/metrics', { cache: 'no-store' });
+export const startAblation = (body) => post('/api/ablation', body);
+export const getAblationJob = (runId) => request(`/api/ablation/${encodeURIComponent(runId)}`);
+export const ablationArtifactUrl = (runId, artifact) =>
+  `${configuredBase}/api/ablation/${encodeURIComponent(runId)}/files/${encodeURIComponent(artifact)}`;

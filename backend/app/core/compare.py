@@ -1,4 +1,4 @@
-"""Compare the old global corpus NMF with the current local KL-NMF flow."""
+"""Global NMF helper retained for offline batch benchmark baselines."""
 
 from __future__ import annotations
 
@@ -17,18 +17,11 @@ except ImportError:  # pragma: no cover - older sklearn fallback.
 
 from .preprocess import preprocess_sentences
 from .sentences import split_sentences
-from .summarize import (
-    SUMMARY_MAX_FEATURES,
-    SUMMARY_NGRAM_RANGE,
-    summarize,
-)
-from .vectorize import vectorize_sentences
 
 
 GLOBAL_MODEL_PATH = Path(__file__).with_name("nmf_corpus.joblib")
 GLOBAL_TRAINED_DOCUMENTS = 3260
 GLOBAL_MODEL_ID = "global_nmf_corpus_3260"
-LOCAL_MODEL_ID = "local_kl_nmf_mmr"
 
 
 @lru_cache(maxsize=1)
@@ -156,106 +149,4 @@ def summarize_global_text(
         "summary": result["summary"],
         "selected_indices": result["selected_indices"],
         "fallback_reason": None,
-    }
-
-
-def _local_summary(
-    text: str,
-    sentences: list[str],
-    processed: list[str],
-    *,
-    k: int | None,
-    budget: int,
-    mmr_lambda: float,
-    seed: int,
-) -> dict[str, Any]:
-    result = summarize(
-        text,
-        k=k,
-        summary_sentences=budget,
-        mmr_lambda=mmr_lambda,
-        seed=seed,
-    )
-    V, terms = vectorize_sentences(
-        processed,
-        ngram_range=SUMMARY_NGRAM_RANGE,
-        max_features=SUMMARY_MAX_FEATURES,
-    )
-    return {
-        "method_id": LOCAL_MODEL_ID,
-        "label": "Local KL-NMF mới",
-        "scope": "Fit trực tiếp trên văn bản đầu vào",
-        "summary": result["summary"],
-        "selected_indices": result["selected_indices"],
-        "topics": [
-            {"topic_index": index, "top_terms": topic["top_terms"]}
-            for index, topic in enumerate(result["topics"])
-        ],
-        "sentence_analysis": result["sentence_analysis"],
-        "metadata": {
-            "k": result["k"],
-            "loss_name": result["loss_name"],
-            "solver": result["solver"],
-            "alpha_W": result["alpha_W"],
-            "alpha_H": result["alpha_H"],
-            "l1_ratio": result["l1_ratio"],
-            "selection_method": result["selection_method"],
-            "mmr_lambda": result["mmr_lambda"],
-            "k_selection_method": result["k_selection_method"],
-            "k_candidates": result["k_candidates"],
-            "vocabulary_size": len(terms),
-            "active_terms": int(np.count_nonzero(np.asarray(V.sum(axis=0)).ravel() > 0)),
-            "ngram_range": list(SUMMARY_NGRAM_RANGE),
-            "max_features": SUMMARY_MAX_FEATURES,
-            "fallback_reason": result["fallback_reason"],
-        },
-    }
-
-
-def _differences(local: dict[str, Any], global_nmf: dict[str, Any]) -> dict[str, Any]:
-    local_indices = set(local["selected_indices"])
-    global_indices = set(global_nmf["selected_indices"])
-    union = local_indices | global_indices
-    overlap = local_indices & global_indices
-    return {
-        "selected_overlap": sorted(overlap),
-        "local_only": sorted(local_indices - global_indices),
-        "global_only": sorted(global_indices - local_indices),
-        "selection_jaccard": len(overlap) / len(union) if union else 1.0,
-        "summary_changed": local["summary"] != global_nmf["summary"],
-        "objective_change": "Global dùng Frobenius/CD đã train sẵn; Local dùng KL divergence + L1 với MU solver.",
-        "vocabulary_change": "Global dùng vocabulary của corpus 3260 bài; Local fit vocabulary mới trên chính các câu đầu vào.",
-        "selection_change": "Global xếp hạng câu bằng trọng số topic từ model cũ; Local chọn câu bằng MMR chuẩn để giảm trùng lặp.",
-    }
-
-
-def compare_global_local(
-    text: str,
-    *,
-    k: int | None = None,
-    summary_sentences: int = 3,
-    mmr_lambda: float = 0.7,
-    seed: int = 42,
-) -> dict[str, Any]:
-    sentences = split_sentences(text)
-    if not sentences:
-        raise ValueError("text must contain at least one sentence")
-    budget = min(summary_sentences, len(sentences))
-    processed = preprocess_sentences(sentences)
-    local = _local_summary(
-        text,
-        sentences,
-        processed,
-        k=k,
-        budget=budget,
-        mmr_lambda=mmr_lambda,
-        seed=seed,
-    )
-    topic_count = max(1, int(local["metadata"].get("k", 1)))
-    global_nmf = _global_summary(sentences, processed, budget, topic_count)
-    return {
-        "sentences": sentences,
-        "local": local,
-        "global_nmf": global_nmf,
-        "differences": _differences(local, global_nmf),
     }

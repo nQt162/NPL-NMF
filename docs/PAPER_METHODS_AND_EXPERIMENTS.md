@@ -2,20 +2,23 @@
 
 Tài liệu này ghi lại các nhánh thuật toán vừa được bổ sung, mức độ tương ứng với các paper trong thư mục dự án và cách đánh giá mà không tạo số liệu giả.
 
+**Trạng thái hiện tại của web:** so sánh Local KL-NMF + L1 + MMR và Local Frobenius-NMF + L1 + MMR. Cùng alpha/L1, k, seed, ngân sách câu và MMR; thay đổi chính là hàm mất mát. Trang mô phỏng dùng MU tự cài đặt để minh họa, còn tóm tắt chạy scikit-learn. NMFTS pairwise và SNMF đồ thị câu đã được rút khỏi API/giao diện. Query PRF vẫn là tùy chọn trên nhánh KL.
+
 ## Phương pháp đã tích hợp
 
 | Nhánh | Objective / chọn câu | Liên hệ paper và giới hạn |
 | --- | --- | --- |
-| Local KL-NMF + L1 + MMR | KL divergence với L1 trên W/H; MMR chọn câu | Nhánh mặc định hiện có. `alpha_w`, `alpha_h`, `l1_ratio` giờ cấu hình được; mặc định vẫn 0.1, 0.1, 1.0. |
-| NMFTS-inspired pairwise | Frobenius reconstruction + symmetric-KL penalty giữa các hàng W, trọng số bởi đồ thị câu; sau đó chọn câu bằng MMR | Bổ sung theo hướng Aghdam và cộng sự. Đồ thị hiện dùng TF-IDF cosine kNN; đây là bản thích nghi/paper-inspired, không tuyên bố tái hiện nguyên trạng semantic representation và toàn bộ thực nghiệm của paper. |
-| SNMF đồ thị câu | Phân rã đối xứng `A ≈ G Gᵀ`; xếp hạng câu trong cụm bằng độ tương tự nội cụm và centrality | Bổ sung theo hướng Wang và cộng sự. Đồ thị TF-IDF cosine là thay thế thực dụng cho biểu diễn quan hệ ngữ nghĩa/semantic-role của paper, không tương đương hoàn toàn. |
+| Local KL-NMF + L1 + MMR | KL divergence với L1 trên W/H; MMR chọn câu | Phương pháp đang hoạt động. `alpha_w`, `alpha_h`, `l1_ratio` cấu hình được; mặc định 0.001, 0.001, 1.0 (chưa tối ưu trên corpus). |
+| Local Frobenius-NMF + L1 + MMR | Nửa bình phương sai số Frobenius + cùng L1 trên W/H; MMR chọn câu | Phương pháp đang hoạt động; đối chiếu loss dưới penalty và chính sách trích câu như nhau. |
+| NMFTS-inspired pairwise | Frobenius reconstruction + symmetric-KL penalty giữa các hàng W, trọng số bởi đồ thị câu; sau đó chọn câu bằng MMR | Nhánh nghiên cứu cũ, đã rút khỏi API/web. Trước đây là bản paper-inspired theo Aghdam và cộng sự, dùng TF-IDF cosine kNN thay cho toàn bộ semantic representation của paper. |
+| SNMF đồ thị câu | Phân rã đối xứng `A ≈ G Gᵀ`; xếp hạng câu trong cụm bằng độ tương tự nội cụm và centrality | Nhánh nghiên cứu cũ, đã rút khỏi API/web. Trước đây là bản paper-inspired theo Wang và cộng sự, không tương đương hoàn toàn biểu diễn semantic-role của paper. |
 | Query PRF | Mở rộng query bằng centroid của tối đa ba câu pseudo-relevant, kết hợp query relevance với topic relevance rồi chọn bằng MMR | Bổ sung theo hướng Park và An. Chỉ hỗ trợ trên nhánh Local KL-NMF; query phải có từ trùng vocabulary cục bộ. |
 
-Các nhánh có thể chọn tại `/api/summarize` và màn hình Tóm tắt. Với NMFTS/SNMF, tối đa 500 câu mỗi request vì đồ thị câu được lưu dạng ma trận dày.
+Hai method đang được `/api/summarize` và giao diện chấp nhận là Local KL+L1 và Local Frobenius+L1. Cả hai dùng scikit-learn `NMF`, `solver="mu"`, `init="nndsvdar"`, cùng penalty; `beta_loss` lần lượt là `kullback-leibler` và `frobenius`. NMFTS/SNMF không còn được expose qua API/web.
 
 ## Quy tắc chọn k
 
-Khi không truyền `k`, hệ thống tiếp tục dùng masked KL imputation. Quy tắc này được dùng chung giữa Local KL, NMFTS và SNMF để so sánh các nhánh trên cùng chính sách chọn k; nó không phải tiêu chí tối ưu riêng objective NMFTS hay SNMF. Muốn so sánh có kiểm soát hơn, truyền cùng một `k` cho tất cả phương pháp. Không nên diễn giải điểm imputation là chất lượng tóm tắt.
+Khi không truyền `k`, cùng bộ chọn chạy masked positive-entry KL validation cho mọi trang/method: thử `k=1..min(10,n_sentences,n_terms)`, 10 lần giữ lại 20% phần tử TF-IDF dương, rồi chọn k có KL validation thấp nhất. Fit chọn k không áp L1 để giữ tiêu chí cố định. Nếu số phần tử dương quá ít, trả heuristic với score rỗng; không giả score bằng 0. Đây là tiêu chí khôi phục TF-IDF, không phải ROUGE/chất lượng tóm tắt hay tối ưu riêng Frobenius.
 
 ## Vị trí trên web và tác dụng
 
@@ -23,12 +26,12 @@ Các trang là các mục điều hướng ở sidebar; số trang dưới đây
 
 | Trang / vùng | Phần mới hiển thị | Người dùng quan sát được gì |
 | --- | --- | --- |
-| **02 / Tóm tắt văn bản** → form bên trái, menu **Phương pháp** | Local KL-NMF + L1 + MMR, NMFTS-inspired pairwise KL, SNMF đồ thị câu | Chọn nhánh trên cùng input. Panel **Phương pháp đang chọn** bên phải tóm tắt objective và cách chọn câu của nhánh đó. |
-| **02 / Tóm tắt văn bản** → form, truy vấn và **Tham số thuật toán** | Query PRF, alpha W/H, L1 ratio, MMR λ, pairwise λ | Query và query weight chỉ hiện với Local KL; pairwise λ chỉ hiện với NMFTS; alpha/L1 chỉ hiện với Local KL. Tác dụng: điều chỉnh đúng tham số của từng phương pháp mà không gán chúng nhầm sang nhánh khác. |
-| **02 / Tóm tắt văn bản** → kết quả sau khi chạy | Panel **Objective**, **Ứng viên k**, từ khóa chủ đề và **Phân tích từng câu** | Xem loss breakdown đúng objective, candidate k khi auto-k, câu/từ khóa được chọn, relevance/redundancy và query relevance nếu PRF hoạt động. Với query không khớp, cảnh báo nêu lý do. |
-| **03 / Đánh giá** → **Thí nghiệm batch** | Bảng trung bình theo phương pháp và bảng từng bài | Sau khi chạy batch và nhấn **Làm mới dữ liệu**, đối chiếu ROUGE-1/2/L, thời gian, số câu, số bài và fallback cho Lead-N, Global NMF, Local KL, NMFTS, SNMF; Query PRF chỉ xuất hiện khi split có query đầy đủ. |
-| **03 / Đánh giá** → **Đánh giá một mẫu** | Chọn method/k, ngân sách câu, MMR/pairwise và query PRF tùy chọn | Xem nhanh ROUGE cùng summary, objective, k và loss của một văn bản/reference cụ thể. Đây là kiểm tra một mẫu, không thay thế batch benchmark. |
-| **04 / So sánh NMF** | Global NMF cũ vs Local KL-NMF | Trang này vẫn chỉ so sánh hai luồng Global/Local; NMFTS, SNMF và Query PRF không nằm trong màn hình này, mà được chọn ở trang 02 và benchmark ở trang 03. |
+| **01 / Mô phỏng NMF** → menu phương pháp | Local KL-NMF + L1 hoặc Local Frobenius-NMF + L1 | Quan sát snapshot từ MU tự cài đặt, không phải trace sklearn; chọn k, số vòng lặp và seed. Loss khác thang đo nên không so trực tiếp giữa hai kiểu. |
+| **02 / Tóm tắt văn bản** → form bên trái, menu **Phương pháp** | Local KL-NMF + L1 + MMR hoặc Local Frobenius-NMF + L1 + MMR | Hai method dùng cùng L1, MMR, chính sách k và thứ tự câu gốc; khác loss. |
+| **02 / Tóm tắt văn bản** → form, truy vấn và **Tham số thuật toán** | Query PRF, alpha W/H, L1 ratio và MMR λ | Alpha/L1 và MMR dùng chung hai nhánh; PRF chỉ hỗ trợ KL. Không còn pairwise λ vì NMFTS đã rút khỏi web. |
+| **02 / Tóm tắt văn bản** → kết quả sau khi chạy | Panel **Objective**, **Ứng viên k**, từ khóa đặc trưng/câu đại diện và **Phân tích từng câu** | Xem objective breakdown, k validation/heuristic, topic latent và candidate MMR theo từng vòng. Chỉ so MMR score trong cùng vòng; PRF relevance hiện khi hoạt động. |
+| **03 / Đánh giá** | Văn bản nguồn, bản tham chiếu, k/ngân sách câu, seed và tham số chung | Sinh hai summary với KL+L1+MMR và Frobenius+L1+MMR trên cùng cấu hình; báo ROUGE-1/2/L. |
+| **04 / Ablation L1** | KL-NMF không L1, L1 trên W, L1 trên H và L1 trên cả W/H | Web nhập một bài viết/reference trực tiếp (pilot); CLI nhận JSONL. So sánh ghép cặp ROUGE và thống kê W/H dưới cùng seed/k/MMR. |
 
 Tuning không có màn hình web riêng: `scripts/tune_params.py` lưu best config và grid vào `results/tuning/tuning.json`/`tuning.csv`. Dùng cấu hình đã chọn khi chạy batch trên test, sau đó trang 03 đọc metrics qua backend API.
 
@@ -36,9 +39,9 @@ Các hiệu quả được mô tả ở đây là **tác dụng dự kiến củ
 
 ## Benchmark và tuning
 
-`scripts/run_experiment.py` chạy cùng bài và cùng ngân sách câu qua Lead-N, Global NMF cũ, Local KL+L1+MMR, NMFTS pairwise và SNMF. Query PRF chỉ được thêm khi mọi bài trong split đều có `query`. Lỗi từng phương pháp được ghi vào `report.json`, không bị đổi thành ROUGE bằng 0 trong `metrics.csv`.
+`scripts/run_experiment.py` là công cụ benchmark batch ngoại tuyến, tách biệt với trang **03 / Đánh giá**. Trang web sinh hai summary từ cùng văn bản đầu vào, dùng chung k, số câu, seed và MMR rồi chấm ROUGE với cùng reference; benchmark batch không được hiển thị trên trang.
 
-`scripts/tune_params.py` tìm cấu hình trên validation: k (0 nghĩa tự chọn), số câu, alpha W/H, L1 ratio, MMR lambda, pairwise lambda và trọng số query. Một cấu hình chỉ được xếp hạng khi chạy thành công trên toàn bộ bài validation, để tránh so sánh trên các tập con khác nhau. Không tune trên test.
+`scripts/tune_params.py` tìm cấu hình cho hai phương pháp: k (0 nghĩa tự chọn), số câu, alpha W/H, L1 ratio và MMR lambda. Cùng grid penalty được dùng cho cả hai loss để cô lập tác động hàm mất mát. Một cấu hình chỉ được xếp hạng khi chạy thành công trên toàn bộ bài validation; không tune trên test.
 
 Từ thư mục `backend`, sau khi đã chuẩn bị dữ liệu:
 
@@ -46,14 +49,14 @@ Từ thư mục `backend`, sau khi đã chuẩn bị dữ liệu:
 .\.venv\Scripts\python.exe ..\scripts\tune_params.py `
   --input ..\data\splits\val.jsonl `
   --output ..\results\tuning `
-  --methods local_kl_mmr nmfts_pairwise snmf
+  --methods local_kl_mmr local_frobenius_mmr
 
 .\.venv\Scripts\python.exe ..\scripts\run_experiment.py `
   --input ..\data\splits\test.jsonl `
   --output ..\results
 ```
 
-Mỗi dòng JSONL cần có `id`, `article`, `reference_summary`; `query` là trường bắt buộc nếu muốn đưa Query PRF vào batch. Bài viết cần được chia theo bài vào train/validation/test, không chia các câu của cùng bài qua nhiều split. Ghi nguồn và quyền sử dụng dữ liệu trong manifest.
+Mỗi dòng JSONL cần có `id`, `article`, `reference_summary`. Bài viết cần được chia theo bài vào train/validation/test, không chia các câu của cùng bài qua nhiều split. Ghi nguồn và quyền sử dụng dữ liệu trong manifest.
 
 ## Đọc kết quả
 
@@ -61,7 +64,7 @@ Mỗi dòng JSONL cần có `id`, `article`, `reference_summary`; `query` là tr
 - `results/predictions.jsonl`: summary và chỉ số câu được chọn để kiểm tra định tính.
 - `results/report.json`: cấu hình, trung bình theo phương pháp và lỗi phát sinh.
 - Web đọc batch metrics qua `GET /api/experiment/metrics`; ROUGE một mẫu được tính qua `POST /api/evaluate`.
-- Loss hiển thị trong màn hình tóm tắt là objective của nhánh đang chạy: KL+L1, Frobenius+pairwise symmetric KL hoặc symmetric Frobenius. Không so sánh trực tiếp các trị số loss giữa những objective khác nhau.
+- Loss trong mô phỏng là objective của custom MU; tóm tắt là objective sklearn. Cả hai nhánh dùng KL+L1 hoặc Frobenius+L1. Không so trị số loss trực tiếp giữa hai objective/implementation; dùng ROUGE trên cùng reference.
 
 ## Việc còn cần cho kết luận học thuật
 
@@ -71,13 +74,13 @@ Các bước tiếp theo có giá trị cao:
 
 1. Chuẩn bị tập dữ liệu tiếng Việt có reference summary, ghi rõ nguồn/quyền và split theo bài; dùng validation để tuning, chỉ mở test một lần cho báo cáo cuối.
 2. Thêm đánh giá định tính mù bởi người đọc (coverage, coherence, redundancy, factuality) bên cạnh ROUGE; với dữ liệu đủ lớn, bổ sung BERTScore và khoảng tin cậy/bootstrap theo bài.
-3. Làm ablation: KL vs Frobenius; có/không L1; có/không pairwise; MMR vs xếp hạng relevance; query PRF bật/tắt. Giữ nguyên corpus, k, số câu và seed trong mỗi cặp so sánh.
+3. Làm ablation: KL vs Frobenius, có/không L1 và tác động của MMR; giữ nguyên corpus, k, số câu và seed trong mỗi cặp so sánh.
 4. Nếu muốn tuyên bố tái hiện paper, thay đồ thị TF-IDF cosine bằng đúng semantic-role/semantic similarity được mô tả trong paper, khớp tiền xử lý và siêu tham số, rồi đánh giá trên dataset paper dùng.
 
 ## Mã nguồn liên quan
 
-- `backend/app/core/paper_methods.py`: đồ thị câu, objective/updates NMFTS-inspired và symmetric NMF.
-- `backend/app/core/summarize.py`: ba nhánh tóm tắt, PRF, loss breakdown và metadata.
+- `backend/app/core/paper_methods.py`: mã nghiên cứu NMFTS/SNMF cũ, không còn được gọi trong luồng web.
+- `backend/app/core/summarize.py`: hai nhánh tóm tắt đang hoạt động, PRF tùy chọn trên KL, loss breakdown và metadata.
 - `backend/app/schemas.py`, `backend/app/main.py`: request/response API và batch metrics endpoint.
 - `scripts/run_experiment.py`: so sánh baseline và các nhánh NMF.
 - `scripts/tune_params.py`: tìm cấu hình chỉ trên validation.

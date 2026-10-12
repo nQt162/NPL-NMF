@@ -10,7 +10,7 @@ from app.core.nmf import (
 )
 from app.core.sentences import split_sentences
 import app.core.summarize as summarize_module
-from app.core.summarize import summarize
+from app.core.summarize import METHOD_FROBENIUS, summarize
 import numpy as np
 
 
@@ -54,7 +54,7 @@ def test_fallback_and_lead_n() -> None:
 def test_summary_auto_k_uses_local_sentence_count() -> None:
     result = summarize(TEXT, summary_sentences=2)
     assert 1 <= result["k"] <= len(split_sentences(TEXT))
-    assert result["k_selection_method"] == "masked_kl_imputation"
+    assert result["k_selection_method"] == "positive_entry_masked_kl_cv"
     assert result["k_candidates"]
     assert len(result["topics"]) == result["k"]
     assert len(result["selected_indices"]) == 2
@@ -65,6 +65,27 @@ def test_summary_accepts_standard_mmr_lambda() -> None:
     assert result["selection_method"] == "maximum_marginal_relevance"
     assert result["mmr_lambda"] == 0.35
     assert all("coverage_gain" not in row for row in result["sentence_analysis"])
+
+
+def test_summary_supports_local_frobenius_with_mmr() -> None:
+    result = summarize(
+        TEXT,
+        k=2,
+        summary_sentences=2,
+        method=METHOD_FROBENIUS,
+        mmr_lambda=0.6,
+    )
+
+    assert result["method"] == METHOD_FROBENIUS
+    assert result["loss_name"] == "frobenius"
+    assert result["objective"] == "local_frobenius_plus_l1"
+    assert result["selection_method"] == "maximum_marginal_relevance"
+    assert result["mmr_lambda"] == 0.6
+    assert len(result["selected_indices"]) == 2
+    assert result["regularization_loss"] > 0
+    assert result["alpha_W"] == SPARSE_KL_ALPHA_W
+    assert result["alpha_H"] == SPARSE_KL_ALPHA_H
+    assert result["l1_ratio"] == SPARSE_KL_L1_RATIO
 
 
 def test_summary_uses_kl_mu_sparse_nmf(monkeypatch) -> None:
@@ -88,7 +109,61 @@ def test_summary_uses_kl_mu_sparse_nmf(monkeypatch) -> None:
     assert captured["alpha_H"] == SPARSE_KL_ALPHA_H
     assert captured["l1_ratio"] == SPARSE_KL_L1_RATIO
     assert captured["max_iter"] == SPARSE_KL_MAX_ITER
-    assert captured["init"] == "nndsvda"
+    assert captured["init"] == "nndsvdar"
+    assert captured["random_state"] == 42
+
+
+def test_both_losses_use_same_l1_and_seeded_stochastic_initialization(monkeypatch) -> None:
+    calls = []
+
+    class FakeNMF:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            self.components_ = None
+
+        def fit_transform(self, V):
+            self.components_ = np.ones((calls[-1]["n_components"], V.shape[1]))
+            return np.ones((V.shape[0], calls[-1]["n_components"]))
+
+    monkeypatch.setattr(summarize_module, "SklearnNMF", FakeNMF)
+    summarize(TEXT, k=2, summary_sentences=2, seed=17)
+    summarize(TEXT, k=2, summary_sentences=2, seed=23, method=METHOD_FROBENIUS)
+
+    assert calls[0]["alpha_W"] == calls[1]["alpha_W"] == SPARSE_KL_ALPHA_W
+    assert calls[0]["alpha_H"] == calls[1]["alpha_H"] == SPARSE_KL_ALPHA_H
+    assert calls[0]["l1_ratio"] == calls[1]["l1_ratio"] == SPARSE_KL_L1_RATIO
+    assert calls[0]["init"] == calls[1]["init"] == "nndsvdar"
+    assert calls[0]["random_state"] == 17
+    assert calls[1]["random_state"] == 23
+
+
+def test_mmr_scores_are_traced_per_greedy_round() -> None:
+    result = summarize(TEXT, k=2, summary_sentences=3)
+    trace = result["selection_trace"]
+    assert len(trace) == 3
+    assert [entry["round"] for entry in trace] == [1, 2, 3]
+    assert {entry["selected_index"] for entry in trace} == set(result["selected_indices"])
+    assert all(any(candidate["index"] == entry["selected_index"] for candidate in entry["candidates"]) for entry in trace)
+
+
+def test_topic_terms_include_representative_sentences() -> None:
+    result = summarize(TEXT, k=2, summary_sentences=2)
+    assert all(topic["top_terms"] for topic in result["topics"])
+    assert all(topic["representative_sentences"] for topic in result["topics"])
+
+
+def test_large_l1_that_collapses_factors_uses_explained_fallback() -> None:
+    result = summarize(
+        TEXT,
+        k=2,
+        summary_sentences=2,
+        method=METHOD_FROBENIUS,
+        alpha_w=0.1,
+        alpha_h=0.1,
+    )
+    assert len(result["selected_indices"]) == 2
+    assert result["fallback_reason"]
+    assert "collapsed to zero" in result["fallback_reason"]
 
 
 def test_rouge_preserves_vietnamese_diacritics() -> None:

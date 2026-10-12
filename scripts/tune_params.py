@@ -14,17 +14,14 @@ from typing import Any
 from app.core.evaluate import rouge_f1
 from app.core.sentences import split_sentences
 from app.core.summarize import (
-    DEFAULT_PAIRWISE_LAMBDA,
-    DEFAULT_QUERY_WEIGHT,
+    METHOD_FROBENIUS,
     METHOD_LOCAL_KL,
-    METHOD_NMFTS,
-    METHOD_SNMF,
     summarize,
 )
 
 
 METRIC_FIELDS = ("rouge1_f1", "rouge2_f1", "rougeL_f1")
-TUNABLE_METHODS = ("local_kl_mmr", "local_kl_prf", METHOD_NMFTS, METHOD_SNMF)
+TUNABLE_METHODS = (METHOD_LOCAL_KL, METHOD_FROBENIUS)
 
 
 def _load_articles(input_path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -56,8 +53,6 @@ def _configurations(
     alpha_h_values: list[float],
     l1_ratio_values: list[float],
     mmr_values: list[float],
-    pairwise_values: list[float],
-    query_weight_values: list[float],
 ):
     for method in methods:
         for k, sentence_count in product(k_values, sentence_values):
@@ -66,44 +61,18 @@ def _configurations(
                 "k": None if k == 0 else k,
                 "summary_sentences": sentence_count,
             }
-            if method in {"local_kl_mmr", "local_kl_prf"}:
-                weights = query_weight_values if method == "local_kl_prf" else [DEFAULT_QUERY_WEIGHT]
-                for alpha_w, alpha_h, l1_ratio, mmr_lambda, query_weight in product(
-                    alpha_w_values,
-                    alpha_h_values,
-                    l1_ratio_values,
-                    mmr_values,
-                    weights,
-                ):
-                    yield {
-                        **common,
-                        "alpha_w": alpha_w,
-                        "alpha_h": alpha_h,
-                        "l1_ratio": l1_ratio,
-                        "mmr_lambda": mmr_lambda,
-                        "query_weight": query_weight,
-                        "pairwise_lambda": DEFAULT_PAIRWISE_LAMBDA,
-                    }
-            elif method == METHOD_NMFTS:
-                for pairwise_lambda, mmr_lambda in product(pairwise_values, mmr_values):
-                    yield {
-                        **common,
-                        "pairwise_lambda": pairwise_lambda,
-                        "mmr_lambda": mmr_lambda,
-                        "alpha_w": 0.0,
-                        "alpha_h": 0.0,
-                        "l1_ratio": 1.0,
-                        "query_weight": DEFAULT_QUERY_WEIGHT,
-                    }
-            else:
+            for alpha_w, alpha_h, l1_ratio, mmr_lambda in product(
+                alpha_w_values,
+                alpha_h_values,
+                l1_ratio_values,
+                mmr_values,
+            ):
                 yield {
                     **common,
-                    "pairwise_lambda": DEFAULT_PAIRWISE_LAMBDA,
-                    "mmr_lambda": 0.7,
-                    "alpha_w": 0.0,
-                    "alpha_h": 0.0,
-                    "l1_ratio": 1.0,
-                    "query_weight": DEFAULT_QUERY_WEIGHT,
+                    "alpha_w": alpha_w,
+                    "alpha_h": alpha_h,
+                    "l1_ratio": l1_ratio,
+                    "mmr_lambda": mmr_lambda,
                 }
 
 
@@ -114,16 +83,12 @@ def _summarize_config(item: dict[str, Any], config: dict[str, Any], seed: int) -
         "k": config["k"],
         "summary_sentences": config["summary_sentences"],
         "seed": seed,
-        "method": METHOD_NMFTS if method == METHOD_NMFTS else METHOD_SNMF if method == METHOD_SNMF else METHOD_LOCAL_KL,
-        "pairwise_lambda": config["pairwise_lambda"],
+        "method": method,
         "mmr_lambda": config["mmr_lambda"],
         "alpha_w": config["alpha_w"],
         "alpha_h": config["alpha_h"],
         "l1_ratio": config["l1_ratio"],
     }
-    if method == "local_kl_prf":
-        kwargs["query"] = item["query"]
-        kwargs["query_weight"] = config["query_weight"]
     return summarize(**kwargs)
 
 
@@ -138,8 +103,6 @@ def tune_params(
     alpha_h_values: list[float],
     l1_ratio_values: list[float],
     mmr_values: list[float],
-    pairwise_values: list[float],
-    query_weight_values: list[float],
     seed: int = 42,
     rank_metric: str = "rougeL_f1",
 ) -> dict[str, Any]:
@@ -159,8 +122,6 @@ def tune_params(
         ("alpha_h", alpha_h_values, 1.0),
         ("l1_ratio", l1_ratio_values, 1.0),
         ("mmr_lambda", mmr_values, 1.0),
-        ("pairwise_lambda", pairwise_values, 10.0),
-        ("query_weight", query_weight_values, 1.0),
     ):
         if not values or any(value < 0 or value > upper for value in values):
             raise ValueError(f"{name} candidates must be between 0 and {upper}")
@@ -168,11 +129,6 @@ def tune_params(
     articles, errors = _load_articles(input_path)
     if not articles:
         raise ValueError("No valid validation articles found; no tuning scores were produced")
-    if "local_kl_prf" in methods and not all(
-        isinstance(item.get("query"), str) and item["query"].strip() for item in articles
-    ):
-        raise ValueError("local_kl_prf requires a non-empty query for every validation article")
-
     results: list[dict[str, Any]] = []
     for config in _configurations(
         methods,
@@ -182,8 +138,6 @@ def tune_params(
         alpha_h_values,
         l1_ratio_values,
         mmr_values,
-        pairwise_values,
-        query_weight_values,
     ):
         start = perf_counter()
         scores: list[dict[str, float]] = []
@@ -220,7 +174,7 @@ def tune_params(
         key: results[0][key]
         for key in (
             "method", "k", "summary_sentences", "alpha_w", "alpha_h", "l1_ratio",
-            "mmr_lambda", "pairwise_lambda", "query_weight",
+            "mmr_lambda",
         )
     }
     report = {
@@ -251,15 +205,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True, help="Labeled validation JSONL; never use the test split")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--methods", nargs="+", choices=TUNABLE_METHODS, default=["local_kl_mmr", METHOD_NMFTS, METHOD_SNMF])
+    parser.add_argument("--methods", nargs="+", choices=TUNABLE_METHODS, default=list(TUNABLE_METHODS))
     parser.add_argument("--k", type=int, nargs="+", default=[0, 3], help="Use 0 for automatic masked-KL k")
     parser.add_argument("--summary-sentences", type=int, nargs="+", default=[2, 3])
-    parser.add_argument("--alpha-w", type=float, nargs="+", default=[0.05, 0.1])
-    parser.add_argument("--alpha-h", type=float, nargs="+", default=[0.05, 0.1])
+    parser.add_argument("--alpha-w", type=float, nargs="+", default=[0.0, 0.0005, 0.001, 0.005])
+    parser.add_argument("--alpha-h", type=float, nargs="+", default=[0.0, 0.0005, 0.001, 0.005])
     parser.add_argument("--l1-ratio", type=float, nargs="+", default=[1.0])
     parser.add_argument("--mmr-lambda", type=float, nargs="+", default=[0.65, 0.8])
-    parser.add_argument("--pairwise-lambda", type=float, nargs="+", default=[0.05, 0.1, 0.2])
-    parser.add_argument("--query-weight", type=float, nargs="+", default=[0.25, 0.5, 0.75])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--rank-metric", choices=METRIC_FIELDS, default="rougeL_f1")
     args = parser.parse_args()
@@ -273,8 +225,6 @@ def main() -> None:
         alpha_h_values=args.alpha_h,
         l1_ratio_values=args.l1_ratio,
         mmr_values=args.mmr_lambda,
-        pairwise_values=args.pairwise_lambda,
-        query_weight_values=args.query_weight,
         seed=args.seed,
         rank_metric=args.rank_metric,
     )
