@@ -10,8 +10,9 @@ from app.core.nmf import (
 )
 from app.core.sentences import split_sentences
 import app.core.summarize as summarize_module
-from app.core.summarize import METHOD_FROBENIUS, summarize
+from app.core.summarize import METHOD_FROBENIUS, METHOD_LOCAL_KL, summarize
 import numpy as np
+import pytest
 
 
 TEXT = (
@@ -86,6 +87,63 @@ def test_summary_supports_local_frobenius_with_mmr() -> None:
     assert result["alpha_W"] == SPARSE_KL_ALPHA_W
     assert result["alpha_H"] == SPARSE_KL_ALPHA_H
     assert result["l1_ratio"] == SPARSE_KL_L1_RATIO
+
+
+@pytest.mark.parametrize("method", [METHOD_LOCAL_KL, METHOD_FROBENIUS])
+def test_query_prf_steers_selection_without_changing_nmf(method: str) -> None:
+    options = {"k": 2, "summary_sentences": 1, "method": method}
+    baseline = summarize(TEXT, **options)
+    result = summarize(TEXT, query="rau", query_weight=1.0, **options)
+
+    assert result["fallback_reason"] is None
+    assert result["query_feedback_applied"] is True
+    assert result["query_feedback_reason"] is None
+    assert result["query_feedback_method"] == "pseudo_relevance_feedback"
+    assert result["selection_method"] == "query_prf_mmr"
+    assert result["pseudo_relevant_indices"]
+    assert len(result["selected_indices"]) == 1
+    assert "rau" in result["summary"].lower()
+    assert max(row["query_relevance"] for row in result["sentence_analysis"]) == pytest.approx(1.0)
+    for row in result["sentence_analysis"]:
+        assert row["relevance"] == pytest.approx(row["query_relevance"])
+    for key in ("k", "k_candidates", "topics", "loss_value", "data_loss", "regularization_loss"):
+        assert result[key] == baseline[key]
+
+
+@pytest.mark.parametrize("method", [METHOD_LOCAL_KL, METHOD_FROBENIUS])
+def test_query_weight_controls_relevance_blend(method: str) -> None:
+    options = {"k": 2, "summary_sentences": 2, "method": method}
+    baseline = summarize(TEXT, **options)
+    ignored = summarize(TEXT, query="rau", query_weight=0.0, **options)
+    blended = summarize(TEXT, query="rau", query_weight=0.25, **options)
+
+    assert ignored["selected_indices"] == baseline["selected_indices"]
+    assert ignored["selection_trace"] == baseline["selection_trace"]
+    for original, updated in zip(baseline["sentence_analysis"], blended["sentence_analysis"]):
+        assert updated["relevance"] == pytest.approx(
+            0.75 * original["relevance"] + 0.25 * updated["query_relevance"]
+        )
+
+
+@pytest.mark.parametrize("method", [METHOD_LOCAL_KL, METHOD_FROBENIUS])
+@pytest.mark.parametrize("query", [None, "", "   ", "và là", "qzxv987654321"])
+def test_unusable_query_preserves_standard_summary(method: str, query: str | None) -> None:
+    options = {"k": 2, "summary_sentences": 2, "method": method}
+    baseline = summarize(TEXT, **options)
+    result = summarize(TEXT, query=query, **options)
+
+    assert result["fallback_reason"] is None
+    assert result["query_feedback_applied"] is False
+    assert result["pseudo_relevant_indices"] == []
+    assert result["selection_method"] == "maximum_marginal_relevance"
+    assert result["summary"] == baseline["summary"]
+    assert result["selected_indices"] == baseline["selected_indices"]
+    assert result["sentence_analysis"] == baseline["sentence_analysis"]
+    assert result["loss_value"] == baseline["loss_value"]
+    if query:
+        assert result["query_feedback_reason"]
+    else:
+        assert result["query_feedback_reason"] is None
 
 
 def test_summary_uses_kl_mu_sparse_nmf(monkeypatch) -> None:

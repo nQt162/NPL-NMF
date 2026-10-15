@@ -40,7 +40,7 @@ function kMethodLabel(method) {
 export default function Summarizer() {
   const [text, setText] = useState(toy.text);
   const [k, setK] = useState('');
-  const [sentenceCount, setSentenceCount] = useState(3);
+  const [sentenceCount, setSentenceCount] = useState(toy.ground_truth_indices.length);
   const [method, setMethod] = useState('local_kl_mmr');
   const [mmrLambda, setMmrLambda] = useState(0.7);
   const [alphaW, setAlphaW] = useState(0.001);
@@ -81,7 +81,7 @@ export default function Summarizer() {
         l1_ratio: Number(l1Ratio),
       };
       if (k !== '') payload.k = Number(k);
-      if (query.trim() && method === 'local_kl_mmr') {
+      if (query.trim()) {
         payload.query = query.trim();
         payload.query_weight = Number(queryWeight);
       }
@@ -102,8 +102,6 @@ export default function Summarizer() {
     }
   }
 
-  const localMethod = method === 'local_kl_mmr';
-
   return (
     <section aria-labelledby="summarizer-heading">
       <div className="section-heading">
@@ -120,7 +118,7 @@ export default function Summarizer() {
           <div className="panel-top"><span className="panel-label">VĂN BẢN NGUỒN</span><span className="panel-meta">LOCAL NMF / TWO OBJECTIVES</span></div>
           <label className="field-label" htmlFor="summarize-text">Nội dung cần tóm tắt</label>
           <textarea id="summarize-text" value={text} onChange={(event) => updateField(setText, event.target.value)} rows={12} placeholder="Dán văn bản tiếng Việt vào đây..." />
-          <div className="field-hint"><span>{text.length.toLocaleString('vi-VN')} ký tự</span><button type="button" className="text-button" onClick={() => { setText(toy.text); setResult(null); setError(''); }}>Nạp ví dụ</button></div>
+          <div className="field-hint"><span>{text.length.toLocaleString('vi-VN')} ký tự</span><button type="button" className="text-button" onClick={() => { setText(toy.text); setSentenceCount(toy.ground_truth_indices.length); setResult(null); setCopied(false); setError(''); }}>Nạp ví dụ</button></div>
 
           <label className="field-group field-block" htmlFor="summary-method">Phương pháp
             <select id="summary-method" value={method} onChange={(event) => updateField(setMethod, event.target.value)}>
@@ -135,11 +133,11 @@ export default function Summarizer() {
             <label className="field-group">Số câu tóm tắt<input type="number" min="1" value={sentenceCount} onChange={(event) => updateField(setSentenceCount, event.target.value)} required /></label>
           </div>
 
-          {localMethod && <div className="query-box">
+          <div className="query-box">
             <label className="field-label" htmlFor="summary-query">Truy vấn (không bắt buộc)</label>
             <input id="summary-query" type="text" value={query} maxLength={2000} onChange={(event) => updateField(setQuery, event.target.value)} placeholder="Ví dụ: tác động của chính sách..." />
             {query.trim() && <label className="field-group query-weight">Trọng số truy vấn<input type="number" min="0" max="1" step="0.05" value={queryWeight} onChange={(event) => updateField(setQueryWeight, event.target.value)} /></label>}
-          </div>}
+          </div>
 
           <details className="advanced-settings">
             <summary>Tham số thuật toán <span>+</span></summary>

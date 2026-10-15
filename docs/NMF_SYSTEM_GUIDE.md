@@ -1,6 +1,6 @@
 # Cẩm nang dễ hiểu về NMF và hệ thống TopicSum
 
-> Cập nhật theo code và các ví dụ chạy ngày **12-10-2026**. Đây là tài liệu để học, đọc hiểu hệ thống và chuẩn bị báo cáo. Các số liệu có ghi **ví dụ tính tay** là số đơn giản hóa để giải thích công thức; các số liệu có ghi **chạy thật** được lấy từ code dự án. Ví dụ một bài không phải kết quả benchmark trên corpus.
+> Cập nhật theo code, web và các ví dụ chạy ngày **15-10-2026**. Đây là tài liệu để học, đọc hiểu hệ thống và chuẩn bị báo cáo. Các số liệu có ghi **ví dụ tính tay** là số đơn giản hóa để giải thích công thức; các số liệu có ghi **chạy thật** được lấy từ code dự án. Ví dụ một bài không phải kết quả benchmark trên corpus.
 
 ## Cách đọc tài liệu này
 
@@ -24,7 +24,7 @@ Các công thức viết trong khối `text` để đọc được ngay trong Ma
 
 TopicSum nhận một văn bản tiếng Việt, chọn một số **câu nguyên văn** và ghép chúng theo thứ tự xuất hiện để tạo bản tóm tắt. Đây là tóm tắt **trích xuất**.
 
-Ví dụ, nguồn có 6 câu và bạn yêu cầu giữ 3 câu. Hệ thống phải quyết định nên giữ những câu nào để vừa có thông tin quan trọng, vừa tránh chọn các câu gần trùng nhau.
+Ví dụ mặc định hiện tại có 12 câu nguồn và bạn yêu cầu giữ 4 câu. Hệ thống phải quyết định nên giữ những câu nào để vừa có thông tin quan trọng, vừa tránh chọn các câu gần trùng nhau.
 
 NMF giúp tạo biểu diễn câu-chủ đề. MMR dùng biểu diễn đó và độ tương tự giữa các câu để quyết định câu được giữ. ROUGE được dùng sau đó khi có một bản tóm tắt tham chiếu.
 
@@ -40,28 +40,32 @@ Ba công việc này dùng ba loại điểm khác nhau:
 
 Tóm tắt trích xuất giữ dữ kiện/cách diễn đạt của câu gốc, nhưng việc bỏ các câu xung quanh vẫn có thể làm mất ngữ cảnh. Chẳng hạn câu bắt đầu bằng “Điều này…” có thể khó hiểu nếu câu giải thích trước đó không được giữ.
 
-## 2. Đoạn văn dùng xuyên suốt để minh họa
+## 2. Mẫu AI hiện đang dùng trên web
 
-Đây là văn bản trong [data/demo/toy.json](../data/demo/toy.json):
+Mẫu `test_nmf_01` nằm trong [data/demo/toy.json](../data/demo/toy.json). Ba trang đầu dùng chung bài **12 câu**; trang 03 có sẵn reference **4 câu**. Đây là nội dung minh họa do người dùng cung cấp, không phải bài báo hay số liệu thực tế đã được dự án xác minh.
 
-> Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai. Tuyến mới kết nối ga trung tâm với bệnh viện và hai trường đại học. Đơn vị vận hành bố trí mười xe, mỗi xe có sức chứa bốn mươi người. Giá vé được giữ bằng tuyến buýt thường. Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố. Tháng tới, đơn vị vận hành sẽ khảo sát mức độ hài lòng của hành khách.
+> Trong thập kỷ qua, trí tuệ nhân tạo đã chuyển mình từ một khái niệm nghiên cứu trong phòng thí nghiệm trở thành động lực cốt lõi thúc đẩy kinh tế số tại Việt Nam. Các tập đoàn công nghệ lớn trong nước đang đầu tư hàng trăm triệu USD để xây dựng hạ tầng siêu máy tính và các trung tâm dữ liệu đạt chuẩn quốc tế. Việc làm chủ các mô hình ngôn ngữ lớn tiếng Việt giúp doanh nghiệp nội địa tối ưu hóa quy trình chăm sóc khách hàng và tự động hóa phân tích dữ liệu tài chính. Không chỉ dừng lại ở khối doanh nghiệp, ứng dụng học máy còn tạo ra bước ngoặt lớn trong lĩnh vực nông nghiệp công nghệ cao tại Đồng bằng sông Cửu Long. Hệ thống cảm biến kết hợp thị giác máy tính trên thiết bị bay không người lái cho phép nông dân phát hiện sớm sâu bệnh và theo dõi độ mặn của nguồn nước theo thời gian thực. Nhờ dự báo chính xác các yếu tố thời tiết cực đoan, sản lượng lúa chất lượng cao tại nhiều hợp tác xã đã tăng thêm hai mươi phần trăm trong khi giảm đáng kể lượng phân bón hóa học. Trong ngành y tế, các thuật toán học sâu hỗ trợ phân tích ảnh chụp X-quang và cắt lớp vi tính đang được triển khai thử nghiệm tại nhiều bệnh viện tuyến trung ương. Công nghệ phân tích ảnh y khoa giúp các bác sĩ sàng lọc sớm các dấu hiệu ung thư phổi và đột quỵ với độ chính xác cao, từ đó rút ngắn một nửa thời gian chẩn đoán lâm sàng. Tuy nhiên, quá trình chuyển đổi số sâu rộng bằng trí tuệ nhân tạo tại Việt Nam vẫn đang đối mặt với rào cản lớn về sự thiếu hụt nguồn nhân lực chất lượng cao. Theo các báo cáo thị trường công nghệ, nguồn cung kỹ sư chuyên sâu về dữ liệu và học máy hiện chỉ đáp ứng được khoảng một phần ba nhu cầu thực tế của các doanh nghiệp. Bên cạnh bài toán nhân sự, việc hoàn thiện hành lang pháp lý về bảo mật dữ liệu cá nhân và đạo đức máy tính cũng là yêu cầu cấp bách để phát triển bền vững. Để giải quyết triệt để các thách thức này, sự phối hợp chặt chẽ giữa các trường đại học, viện nghiên cứu và doanh nghiệp trong việc đào tạo thực chiến là yếu tố mang tính quyết định.
 
-Tách thành 6 câu:
-
-| Câu | Nội dung nguyên văn | Thông tin người đọc có thể nhận ra |
+| Câu | Ý người đọc có thể nhận ra | Có trong reference |
 | --- | --- | --- |
-| S1 | Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai. | Sự kiện khai trương. |
-| S2 | Tuyến mới kết nối ga trung tâm với bệnh viện và hai trường đại học. | Tuyến đi qua đâu. |
-| S3 | Đơn vị vận hành bố trí mười xe, mỗi xe có sức chứa bốn mươi người. | Quy mô vận hành. |
-| S4 | Giá vé được giữ bằng tuyến buýt thường. | Giá vé. |
-| S5 | Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố. | Tra cứu dịch vụ. |
-| S6 | Tháng tới, đơn vị vận hành sẽ khảo sát mức độ hài lòng của hành khách. | Đánh giá dịch vụ. |
+| S1 | Vai trò của AI trong kinh tế số | Có |
+| S2 | Đầu tư hạ tầng tính toán/dữ liệu | Không |
+| S3 | Ứng dụng mô hình ngôn ngữ trong doanh nghiệp | Không |
+| S4 | Học máy trong nông nghiệp | Không |
+| S5 | Cảm biến/thị giác máy tính theo dõi cây trồng, nguồn nước | Có |
+| S6 | Dự báo thời tiết, năng suất và phân bón | Không |
+| S7 | Học sâu phân tích ảnh y khoa | Không |
+| S8 | Sàng lọc bệnh, hỗ trợ chẩn đoán | Có |
+| S9 | Rào cản thiếu nhân lực | Không |
+| S10 | Nguồn cung kỹ sư so với nhu cầu | Có |
+| S11 | Bảo mật và đạo đức | Không |
+| S12 | Phối hợp đào tạo | Không |
 
-Cột cuối là cách **con người diễn giải** nội dung. Những tên này không phải nhãn được cung cấp cho NMF và cũng không phải nhãn NMF tự sinh.
+Đây là cách con người diễn giải, không phải nhãn topic được đưa cho NMF. S1-S12 dùng để đọc; JSON index bắt đầu từ 0, nên reference S1/S5/S8/S10 tương ứng `[0,4,7,9]`.
 
-Trong tài liệu dùng số câu S1-S6 để dễ đọc. Trong JSON/code, chỉ số bắt đầu từ 0: S1 có `index=0`, S6 có `index=5`.
+`extractive_summary` ghép nguyên bốn câu đó và được điền vào ô **Bản tóm tắt tham chiếu** trang 03. Nó không phải prediction sẵn của KL/Frobenius. `ground_truth_labels` và danh sách index không được gửi làm nhãn fit/chọn câu; frontend chỉ dùng độ dài danh sách index để đặt ngân sách mẫu là 4, người dùng vẫn sửa được.
 
-Nếu ngân sách là 3 câu, hệ thống giữ đúng `min(3,6)=3` câu khi luồng chọn câu hoàn tất. Nếu nguồn chỉ có 2 câu thì chỉ có thể giữ 2, dù bạn yêu cầu 3.
+Trang 02/03 mặc định giữ `min(4,12)=4` câu khi hoàn tất. Không bắt buộc giữ đúng bốn câu reference. Nút Nạp ví dụ ở trang 03 khôi phục nguồn, reference và ngân sách 4; trang 01/02 cũng dùng bài nguồn mới. Trang 04 chưa điền sẵn dữ liệu và vẫn mặc định 3 câu, phải tự dán bài/reference và đổi sang 4 khi khảo sát cùng mẫu.
 
 ## 3. Toàn bộ luồng xử lý trong một hình
 
@@ -141,21 +145,23 @@ Ví dụ chạy thật của S1 với tokenizer hiện tại:
 
 ```text
 Nguyên bản:
-Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai.
+Trong thập kỷ qua, trí tuệ nhân tạo đã chuyển mình từ một khái niệm nghiên cứu trong phòng thí nghiệm trở thành động lực cốt lõi thúc đẩy kinh tế số tại Việt Nam.
 
 Bản xử lý:
-thành_phố tuyến xe_buýt điện hai
+thập_kỷ trí_tuệ nhân_tạo khái_niệm nghiên_cứu phòng_thí_nghiệm trở_thành động_lực cốt_lõi thúc_đẩy kinh_tế việt_nam
 ```
 
-Dấu gạch dưới như `thành_phố`, `xe_buýt` cho biết Underthesea đã ghép nhiều tiếng thành một token. Đây là cách biểu diễn cho máy; trên web keyword được đổi dấu gạch dưới về dấu cách để dễ đọc.
+Dấu gạch dưới như `phòng_thí_nghiệm` cho biết token có thể gồm nhiều âm tiết. Đây là biểu diễn cho máy; keyword trên web đổi gạch dưới về dấu cách để dễ đọc.
 
-Một ví dụ khác là S5:
+Ví dụ bản xử lý của S5:
 
 ```text
-người_dân có_thể tra_cứu lịch chạy ứng_dụng thành_phố
+hệ_thống cảm_biến kết_hợp thị_giác máy_tính thiết_bị bay lái cho_phép nông_dân phát_hiện sâu_bệnh theo_dõi độ mặn thời_gian thực
 ```
 
-Các bước trong code là lowercase, Underthesea tách từ, giữ token hợp lệ và loại token khớp stopword. Một lưu ý thực tế: code so khớp **đúng token**. Stopword `có thể` với dấu cách không tự khớp token `có_thể`. Trong lần chạy mẫu này, `có_thể` vẫn còn; không nên mặc định mọi cụm có trong stopword file đã được loại.
+Code lowercase, dùng Underthesea, giữ token hợp lệ rồi loại token khớp stopword. So khớp là đúng token: dòng stopword có dấu cách như `có thể` không tự khớp token `có_thể` nếu tokenizer trả dạng đó. Đây là giới hạn chuẩn hóa cần kiểm tra, không được mặc định mọi cụm có trong file stopword đều đã bị loại.
+
+
 
 Bộ tách câu hiện dùng regex. Viết tắt, dấu câu bất thường hoặc văn bản không chuẩn có thể làm số câu khác mong đợi. Khi kết quả khó hiểu, nên kiểm tra phân câu và token trước khi chỉ chỉnh NMF.
 
@@ -179,7 +185,7 @@ Giá trị trước chuẩn hóa = TF(c) × IDF(t)
 
 ### 6.2. Ví dụ tính tay
 
-Giả sử bài có 6 câu:
+Ví dụ tính tay độc lập, không phải mẫu AI 12 câu: giả sử bài có 6 câu:
 
 | Feature giả định | Có trong bao nhiêu câu? | IDF |
 | --- | ---: | ---: |
@@ -207,11 +213,11 @@ norm = "l2"            # chuẩn hóa mỗi hàng câu
 sublinear_tf = True
 ```
 
-Ví dụ token `đơn_vị vận_hành bố_trí` sinh unigram `đơn_vị`, `vận_hành`, `bố_trí`, và bigram `đơn_vị vận_hành`, `vận_hành bố_trí`.
+Ví dụ chuỗi token `thị_giác máy_tính thiết_bị` sinh unigram `thị_giác`, `máy_tính`, `thiết_bị`, và bigram `thị_giác máy_tính`, `máy_tính thiết_bị`.
 
-Bigram được tạo **sau** tiền xử lý. Vì các từ giữa hai token có thể đã bị loại, một bigram như `điện hai` trong ví dụ không nhất thiết là một cụm có nghĩa trong nguồn. Bigram không phải công cụ tự tìm collocation hay cụm danh từ chuẩn ngữ nghĩa.
+Bigram được tạo **sau** tiền xử lý. Vì các từ giữa hai token có thể đã bị loại, một bigram tạo ra không nhất thiết là một cụm có nghĩa hay có các token đứng liền nhau trong nguồn. Bigram không phải công cụ tự tìm collocation hay cụm danh từ chuẩn ngữ nghĩa.
 
-Lần chạy thật của đoạn 6 câu ở phần 2 tạo `V` kích thước **6×65**. Số 65 là kết quả của vocabulary lúc chạy, không phải số từ cố định cho mọi văn bản.
+Lần chạy thật của mẫu AI 12 câu ở phần 2 tạo `V` kích thước **12×321**. Số 321 là số đặc trưng sau tiền xử lý trong môi trường ghi ở phần 17, không phải số từ viết cách hay con số cố định cho mọi văn bản.
 
 **Vị trí code:** [vectorize.py](../backend/app/core/vectorize.py). Chi tiết tham số có trong [TfidfVectorizer của scikit-learn](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html).
 
@@ -280,7 +286,7 @@ V và WH gần nhau nhưng không bằng nhau. Phần 9 sẽ tính loss từ ch�
 
 Câu ban đầu có `m` feature. Hàng W biểu diễn câu bằng `k` hệ số. Nếu `k` nhỏ hơn nhiều so với `m`, biểu diễn câu được thu gọn vào ít thành phần hơn.
 
-Với ví dụ thật `V:6×65` và `k=2`, W là `6×2`, H là `2×65`. Nói chính xác: `rank(WH) ≤ k`; k là số thành phần được yêu cầu, không bảo đảm các thành phần độc lập để rank thực sự bằng k.
+Với mẫu AI thật `V:12×321`, nếu nhập tay `k=3` thì W là `12×3`, H là `3×321`; nếu để auto-k với seed 42 hiện chọn 1 thì W là `12×1`, H là `1×321`. Nói chính xác: `rank(WH) ≤ k`; k là số thành phần được yêu cầu, không bảo đảm các thành phần độc lập để rank thực sự bằng k.
 
 ### 7.4. W/H không phải xác suất và nghiệm không duy nhất
 
@@ -705,7 +711,7 @@ Câu đại diện được chọn theo W đã chuẩn hóa theo hàng; tối đ
 
 - Các latent factors không có nhãn ngữ nghĩa được giám sát.
 - Một bài ngắn không đủ nhiều câu để tách các chủ đề ổn định.
-- Unigram/bigram có thể chồng nhau như `giá`, `vé`, `giá vé`.
+- Unigram/bigram có thể chồng nhau như `học`, `máy`, `học máy` trong kết quả Frobenius của mẫu AI.
 - Bigram sau bỏ stopword có thể không phải cụm nguyên gốc.
 - Token của stopword có thể chưa khớp định dạng trong list.
 - Một topic có ít feature dương thì top 5 không có nghĩa cả 5 đều mạnh; code chưa tự gán độ tin cậy/nhãn cho topic.
@@ -714,9 +720,9 @@ Muốn hiểu topic, xem **keyword cùng câu đại diện**. Nếu tự đặt
 
 ## 16. Query và PRF: tóm tắt theo mối quan tâm của người dùng
 
-Query là nội dung bạn muốn ưu tiên, chẳng hạn “giá vé” hoặc “mức độ hài lòng”. Đây không phải prompt để sinh câu; nó ảnh hưởng điểm relevance của các câu nguồn.
+Query là nội dung bạn muốn ưu tiên, chẳng hạn “ung thư phổi” hoặc “nhân lực” trong mẫu AI. Đây không phải prompt để sinh câu; nó ảnh hưởng điểm relevance của các câu nguồn và cần có token khớp vocabulary cục bộ.
 
-Nhánh KL hiện hỗ trợ PRF:
+Cả hai nhánh KL và Frobenius hỗ trợ cùng quy trình PRF sau phân rã, không thay đổi W/H hay objective:
 
 1. Tiền xử lý query và `transform` nó bằng vectorizer của bài.
 2. Tính similarity với câu; lấy tối đa 3 câu có similarity dương làm pseudo-relevant, còn giới hạn theo ngân sách summary.
@@ -739,104 +745,118 @@ PRF trong code là cách triển khai thực dụng lấy ý tưởng từ nghi�
 
 <a id="chuong-17"></a>
 
-## 17. Chạy thật đoạn 6 câu: đối chiếu lý thuyết với output
+## 17. Chạy thật mẫu AI 12 câu: đối chiếu với web
 
-### 17.1. Cấu hình của lần chạy minh họa
+### 17.1. Cấu hình và xuất xứ
 
-Đây là kết quả chạy core code ngày 12-10-2026 với:
+Đo lại từ core/API TestClient ngày **15-10-2026**, không dùng số của bài xe buýt cũ:
 
 ```text
-input: data/demo/toy.json
-k=2                         # cố định để minh họa hai topic
-summary_sentences=3
-seed=42
-mmr_lambda=0.7
-alpha_W=alpha_H=0.001
-l1_ratio=1.0
-query=None
-
-scikit-learn=1.7.2
-underthesea=9.5.0
-numpy=2.2.6
-rouge-score=0.1.2
-V: 6×65; W: 6×2; H: 2×65
+input: data/demo/toy.json, doc_id=test_nmf_01
+k: để trống; selector chọn 1
+summary_sentences=4
+seed=42; mmr_lambda=0.7
+alpha_W=alpha_H=0.001; l1_ratio=1.0; query=None
+scikit-learn=1.7.2; underthesea=9.5.0
+numpy=2.2.6; rouge-score=0.1.2
+V: 12×321; W: 12×1; H: 1×321
+reference: S1/S5/S8/S10, index 0/4/7/9
 ```
 
-k=2 ở đây là cấu hình chọn tay cho ví dụ, không phải k mà auto selector đã chọn.
+### 17.2. Output và objective cuối
 
-### 17.2. Output thực tế của hai method
-
-| Method | Data loss | Regularization | Total objective | Thứ tự greedy | Câu xuất sau khi sắp nguồn |
+| Method, auto-k=1 | Data loss | Regularization | Tổng objective | Thứ tự greedy | Câu xuất theo nguồn |
 | --- | ---: | ---: | ---: | --- | --- |
-| Local KL + L1 + MMR | 19.841107 | 0.283730 | 20.124838 | S2 → S5 → S3 | S2, S3, S5 |
-| Local Frobenius + L1 + MMR | 1.862525 | 0.217167 | 2.079691 | S1 → S6 → S5 | S1, S5, S6 |
+| KL + L1 + MMR | 153.334189 | 1.222446 | 154.556635 | S8 → S6 → S11 → S4 | S4, S6, S8, S11 |
+| Frobenius + L1 + MMR | 5.492791 | 0.316336 | 5.809127 | S10 → S7 → S3 → S2 | S2, S3, S7, S10 |
 
-**KL summary:**
+Cả hai giữ 4 câu và không fallback. Không so trực tiếp hai trị số objective để kết luận chất lượng. Vòng 10 custom KL ở trang 01 có objective **155.235355**, khác sklearn final **154.556635** vì hai lần fit khác initialization/implementation/dừng, không phải cùng một trace.
 
-> Tuyến mới kết nối ga trung tâm với bệnh viện và hai trường đại học. Đơn vị vận hành bố trí mười xe, mỗi xe có sức chứa bốn mươi người. Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố.
-
-**Frobenius summary:**
-
-> Thành phố mở thêm tuyến xe buýt điện vào sáng thứ Hai. Người dân có thể tra cứu lịch chạy trên ứng dụng của thành phố. Tháng tới, đơn vị vận hành sẽ khảo sát mức độ hài lòng của hành khách.
-
-Không kết luận Frobenius tốt hơn chỉ vì 2.079691 nhỏ hơn 20.124838. Hai số là hai objective khác nhau. Người đọc có thể nhận ra KL giữ quy mô/tuyến đi, Frobenius giữ sự kiện/đánh giá; để chấm overlap cần thêm cùng reference, để chấm mạch lạc cần tiêu chí đọc.
+Trang 01 KL với k=1/seed 42: objective vòng 0 **1070.901937**, vòng 1 **155.733296**, vòng 5 **155.475075**, vòng 10 **155.235355**. Với Frobenius k=1, từ **264.117992** xuống **5.804056** sau 10 vòng; không so trực tiếp thang KL và Frobenius.
 
 ### 17.3. Một vòng MMR thật của Frobenius
 
-Sau khi S1 được chọn, ở vòng 2:
+Ở vòng 2, đã chọn S10:
 
-| Ứng viên | Relevance | Redundancy với S1 | MMR xấp xỉ |
+| Ứng viên | Relevance | Redundancy với S10 | MMR |
 | --- | ---: | ---: | ---: |
-| S2 | 1.000000 | 0.125404 | 0.662379 |
-| S3 | 0.983480 | 0.000000 | 0.688436 |
-| S5 | 1.000000 | 0.066711 | 0.679987 |
-| S6 | 0.983480 | 0.000000 | 0.688436 |
+| S7 | 0.999117 | 0.020520 | 0.693226 |
+| S3 | 0.999869 | 0.031214 | 0.690544 |
 
-S3 và S6 hiển thị bằng nhau ở 6 chữ số nhưng full precision của S6 cao hơn một chút, nên code chọn S6. Ở vòng 3, S3 bị penalty vì cosine với S6 khoảng 0.146670, còn S5 tiếp tục có score khoảng 0.679987 và được chọn.
+S7 có relevance thấp hơn chút nhưng redundancy thấp hơn, nên được chọn. Công thức là `0.7×relevance - 0.3×redundancy`. Đây là hai ứng viên cùng một vòng, không phải so các score_round khác nhau.
 
-Ví dụ này cho thấy cần xem score theo đúng vòng và tránh diễn giải chênh lệch rất nhỏ như khác biệt nội dung chắc chắn.
+Ở k=1, relevance nhiều câu gần bằng nhau; epsilon và chênh lệch full precision vẫn ảnh hưởng thứ tự. Hiển thị cùng 1.000 không bảo đảm bằng nhau tuyệt đối, cũng không chứng minh khác biệt ngữ nghĩa chắc chắn.
 
-### 17.4. Auto-k thật cho cùng V và seed
+### 17.4. Auto-k và kết quả ROUGE mặc định
 
 | k | Mean held-out KL |
 | ---: | ---: |
-| 1 | 4.799174 |
-| 2 | 5.060524 |
-| 3 | 6.224318 |
-| 4 | 7.128896 |
-| 5 | 11.449355 |
-| 6 | 5.116459 |
+| 1 | 3.073278 |
+| 2 | 3.166094 |
+| 3 | 3.253927 |
+| 4 | 3.262430 |
+| 5 | 3.266727 |
+| 6 | 3.273322 |
+| 7 | 3.283471 |
+| 8 | 3.946506 |
+| 9 | 3.712653 |
+| 10 | 4.304974 |
 
-Selector chọn **k=1** trong lần chạy này. Điều đó có nghĩa rank 1 tốt nhất theo protocol held-out đang dùng cho bài này. Nó không bảo đảm relevance phân biệt câu tốt nhất; phần 13 đã chỉ ra k=1 làm relevance dễ gần bằng nhau.
+Selector chọn 1 theo protocol reconstruction validation, không xác nhận bài chỉ có một lĩnh vực. Giao diện sắp ứng viên theo score, nên k=9 đứng trước k=8.
 
-### 17.5. Cách chạy lại core ví dụ
+Trang 03 tự sinh hai outputs, dùng chung k/reference:
 
-Đoạn Python sau cần được chạy trong môi trường backend và từ thư mục `backend`:
+| Method | ROUGE-1 F1 | ROUGE-2 F1 | ROUGE-L F1 |
+| --- | ---: | ---: | ---: |
+| KL + L1 + MMR | 0.3897 | 0.2694 | 0.3282 |
+| Frobenius + L1 + MMR | 0.3979 | 0.2646 | 0.3246 |
+
+Frobenius nhỉnh R1, KL nhỉnh R2/L; không có một nhánh thắng mọi metric và đây chỉ là một mẫu demo.
+
+### 17.5. PRF và thí nghiệm k nhập tay
+
+Giữ Frobenius k=1, query `ung thư phổi`, trọng số 0.5: pseudo-relevant là S8, summary đổi từ S2/S3/S7/S10 sang **S2/S3/S4/S8**, objective vẫn **5.809127**. Với KL k=1 cùng query, tập câu không đổi vì đã có S8, nhưng PRF vẫn áp dụng và objective vẫn **154.556635**. PRF không bắt buộc đổi output và không chỉ dành riêng cho KL.
+
+Nếu nhập tay k=3, cùng 4 câu/seed/penalty, kết quả là:
+
+| Method | Objective | Câu giữ lại | R1 | R2 | RL |
+| --- | ---: | --- | ---: | ---: | ---: |
+| KL + L1 + MMR | 88.362459 | S2, S3, S4, S12 | 0.2094 | 0.0106 | 0.1152 |
+| Frobenius + L1 + MMR | 5.362207 | S1, S4, S8, S9 | 0.5521 | 0.4947 | 0.5104 |
+
+k=3 là lựa chọn quan sát, chưa tune và không phải auto. KL objective giảm so k=1 nhưng ROUGE cũng giảm: minh họa reconstruction không đồng nghĩa downstream quality.
+
+### 17.6. Cách chạy lại
+
+Từ thư mục `backend` với môi trường dự án:
 
 ```python
 import json
 from pathlib import Path
 from app.core.summarize import summarize
+from app.core.evaluate import rouge_f1
 
-text = json.loads(Path("../data/demo/toy.json").read_text(encoding="utf-8"))["text"]
+demo = json.loads(Path("../data/demo/toy.json").read_text(encoding="utf-8"))
 for method in ["local_kl_mmr", "local_frobenius_mmr"]:
     result = summarize(
-        text=text, k=2, summary_sentences=3, seed=42,
+        text=demo["text"], k=None, summary_sentences=4, seed=42,
         method=method, mmr_lambda=0.7,
         alpha_w=0.001, alpha_h=0.001, l1_ratio=1.0,
     )
-    print(method, result["summary"])
-    print("Câu giữ lại:", [index + 1 for index in result["selected_indices"]])
+    print(method, "k=", result["k"], "index=", result["selected_indices"])
     print("Objective:", result["loss_value"])
+    print("ROUGE:", rouge_f1(demo["extractive_summary"], result["summary"]))
 ```
 
-Số liệu có thể đổi nếu tokenizer, stopwords, code hoặc dependencies đổi. Khi đó cập nhật ví dụ theo cấu hình mới, không giữ bảng cũ như kết quả mới.
+Số liệu gắn với text, tokenizer, stopwords, config và dependencies. Không giữ bảng cũ như kết quả mới khi đã đổi môi trường.
 
 <a id="chuong-18"></a>
 
 ## 18. ROUGE: tính rõ một ví dụ từ đầu đến cuối
 
 ### 18.1. Nguồn, candidate và reference
+
+Ví dụ tính tay dưới đây là một cặp câu ngắn độc lập để dễ đếm token, không phải điểm đo của mẫu AI 12 câu trên web.
 
 Ví dụ riêng để dễ đếm token:
 
@@ -927,7 +947,7 @@ Giữ nhiều câu có thể tăng recall nhưng giảm precision. Vì vậy khi
 
 ### 19.1. Trang 01: Mô phỏng NMF
 
-Nhập text, method, k hoặc auto, iterations và seed. Trang này dùng alpha cố định 0.001 trên W/H, ratio=1, và custom MU.
+Trang có sẵn mẫu AI 12 câu. Nhập text, method, k hoặc auto, iterations và seed. Trang dùng alpha cố định 0.001 trên W/H, ratio=1 và custom MU; mặc định 10 vòng/seed 42.
 
 V là đầu vào; W/H là weights từng snapshot; WH là tái tạo. Loss ở vòng 0 tính từ initialization; vòng sau dùng weights đã cập nhật. Đồ thị đi xuống nói objective custom đang giảm trên lần chạy đó.
 
@@ -935,7 +955,7 @@ Panel Ứng viên k là score từ lượt chọn k riêng, không phải loss c
 
 ### 19.2. Trang 02: Tóm tắt văn bản
 
-Có method, k, số câu, MMR lambda, alpha W/H, L1 ratio và query/weight tùy chọn trên KL. Trang này hiện **không có input seed**; request schema summarize cũng không khai báo seed, nên core dùng mặc định **42**.
+Có sẵn mẫu AI, ngân sách 4 câu và nút Nạp ví dụ khôi phục text/ngân sách. Có method, k, số câu, MMR lambda, alpha W/H, L1 ratio và query/weight tùy chọn trên cả KL và Frobenius. Trang này hiện **không có input seed**; request schema summarize cũng không khai báo seed, nên core dùng mặc định **42**.
 
 Các kết quả:
 
@@ -954,7 +974,7 @@ Một số nhãn panel/objective ID vẫn chứa chữ L1 khi `l1_ratio` đã đ
 
 ### 19.3. Trang 03: Đánh giá
 
-Nhập nguồn và reference, cấu hình chung k/ngân sách/alpha/L1/MMR/seed. API tạo KL summary trước; truyền cùng k đã dùng sang Frobenius; chấm hai output với cùng reference.
+Nguồn AI và reference 4 câu đã điền sẵn, ngân sách mặc định 4; nút Nạp ví dụ khôi phục cả hai đoạn và số câu. Có thể sửa nguồn/reference, cấu hình chung k/ngân sách/alpha/L1/MMR/seed. API tạo KL summary trước; truyền cùng k đã dùng sang Frobenius; chấm hai output với cùng reference.
 
 Trang này đang sinh và chấm hai summary, không chỉ nhận một candidate đã tóm tắt sẵn. Vì vậy việc có tham số NMF là để tạo hai output cần so sánh. Phần chấm ROUGE bản thân chỉ cần candidate/reference.
 
@@ -962,7 +982,7 @@ Response evaluate hiện không trả riêng fallback reason của từng method
 
 ### 19.4. Trang 04: Ablation L1
 
-Nhập một bài và reference trực tiếp, chọn alpha, k tùy chọn, số câu, lambda và các seed. Kết quả là thí nghiệm pilot một bài qua các khởi tạo; CLI mới dùng JSONL để chạy nhiều bài.
+Trang chưa điền sẵn bài/reference; ngân sách riêng vẫn mặc định 3 câu, seed 42. Nhập một bài và reference trực tiếp, chọn alpha, k tùy chọn, số câu, lambda và các seed; nếu dùng mẫu AI thì dán hai đoạn và đổi số câu thành 4. Kết quả là thí nghiệm pilot một bài qua các khởi tạo; CLI mới dùng JSONL để chạy nhiều bài.
 
 ### 19.5. Những giá trị mặc định quan trọng
 
@@ -970,7 +990,8 @@ Nhập một bài và reference trực tiếp, chọn alpha, k tùy chọn, số
 | --- | --- | --- |
 | Method tóm tắt | `local_kl_mmr` | Chọn data loss KL. |
 | k | Để trống: selector | Rank/số thành phần NMF. |
-| Số câu | 3 | Ngân sách output. |
+| Số câu trên trang 02/03 | 4 | Khớp độ dài reference mẫu, vẫn sửa được. |
+| Số câu trên trang 04 / API core | 3 | Mặc định riêng, không tự đổi theo mẫu web. |
 | MMR lambda | 0.7 | Cân bằng relevance và redundancy. |
 | Alpha W/H | 0.001 / 0.001 | Cường độ regularization; chưa tune corpus. |
 | L1 ratio | 1.0 | Mặc định pure L1. |
@@ -981,6 +1002,8 @@ Nhập một bài và reference trực tiếp, chọn alpha, k tùy chọn, số
 Để so k giữa trang 01 và 02, dùng cùng text, cùng preprocessing và seed=42 ở trang 01. Đổi seed trên trang 01 hoặc Đánh giá có thể đổi mask/initialization, trong khi trang 02 vẫn dùng 42. Dùng chung **cách** chọn k không có nghĩa cùng **kết quả** nếu đầu vào/seed khác.
 
 ## 20. Ablation L1: đọc bảng theo từng câu hỏi
+
+Ví dụ thực đo trên mẫu AI mới: k=3 nhập tay, 4 câu, alpha 0.001, lambda 0.7, seeds 42/43/44, query tắt. Baseline R1/R2/L trung bình là 0.612277/0.518893/0.567988; chỉ phạt H là 0.606061/0.520408/0.575758; phạt W hoặc W+H là 0.209424/0.010582/0.115183. Các tỷ lệ W/H gần 0 lại giống nhau giữa bốn nhánh. Đây là pilot, không kết luận L1 luôn tăng chất lượng hay độ thưa; xem cấu hình/bảng đầy đủ ở [ABLATION_L1.md](ABLATION_L1.md). Không so bảng k=3 này với trang 03 auto-k=1 để quy thay đổi cho L1.
 
 ### 20.1. Bốn nhánh kiểm tra
 
@@ -1039,7 +1062,7 @@ Runtime ablation là thời gian gọi summarize với k đã cố định; th�
 
 ## 21. Những gì đã chạy được và những gì chưa được chứng minh
 
-Hệ thống đã có pipeline local, hai data losses, penalty điều chỉnh được, custom simulation, MMR trace, PRF trên KL, ROUGE và ablation. Có chức năng chạy thật không đồng nghĩa đã có bằng chứng chất lượng tổng quát.
+Hệ thống đã có pipeline local, hai data losses, penalty điều chỉnh được, custom simulation, MMR trace, PRF trên cả KL và Frobenius, ROUGE và ablation. Có chức năng chạy thật không đồng nghĩa đã có bằng chứng chất lượng tổng quát.
 
 Ngày kiểm tra này, các file sau có kích thước 0 byte:
 
@@ -1073,7 +1096,7 @@ Selector auto-k tốn nhiều lần fit: tối đa 10 k × 10 trial, sau đó c�
 | Lee & Seung, NMF/MU | Phân rã không âm và cập nhật nhân tử cho objective. | Nền tảng giải thích; custom MU minh họa và sklearn là hai implementations. |
 | Aghdam, NMFTS (2023) | Thêm regularization quan hệ cặp câu để đưa các câu liên hệ gần nhau trong biểu diễn tiềm ẩn. | Nhánh nghiên cứu cũ đã rút khỏi API/web; KL+L1 hiện tại không đồng nhất với NMFTS. |
 | Wang et al., symmetric NMF (SIGIR 2008) | Semantic sentence similarity, symmetric factorization để gom câu và chọn đại diện. | SNMF đồ thị câu đã rút khỏi web; không phải phương pháp `V≈WH` hiện tại. |
-| Park & An, PRF với NMF | Dùng query và pseudo-relevant content cho tóm tắt cá nhân hóa. | PRF thực dụng trên nhánh KL lấy cảm hứng, chưa khớp nguyên representation/dataset/protocol paper. |
+| Park & An, PRF với NMF | Dùng query và pseudo-relevant content cho tóm tắt cá nhân hóa. | PRF thực dụng trên cả KL và Frobenius lấy cảm hứng, chưa khớp nguyên representation/dataset/protocol paper. |
 | Carbonell & Goldstein, MMR | Cân bằng relevance với novelty khi rerank/chọn. | Công thức greedy MMR với relevance tùy cách định nghĩa của project và similarity TF-IDF. |
 | Lin, ROUGE | Chấm overlap của candidate và reference. | Dùng rouge-score với tokenizer tiếng Việt của project. |
 
@@ -1098,6 +1121,8 @@ Khi báo cáo, phân biệt **dùng ý tưởng nghiên cứu**, **dùng thư vi
 | [Summarizer.jsx](../frontend/src/pages/Summarizer.jsx) | Form summary, objective, topic/câu/trace. |
 | [Evaluation.jsx](../frontend/src/pages/Evaluation.jsx) | Tạo/chấm hai output với cấu hình chung. |
 | [Ablation.jsx](../frontend/src/pages/Ablation.jsx) | Form nhập một bài/reference và bảng ablation. |
+| [toy.json](../data/demo/toy.json) | 12 câu mẫu AI, reference S1/S5/S8/S10 và metadata. |
+| [demo.test.js](../frontend/src/demo.test.js) | Kiểm tra text, số câu, nhãn và reference của mẫu đồng bộ. |
 | [run_experiment.py](../scripts/run_experiment.py) | Batch Lead-N/Global NMF/hai Local NMF và export. |
 | [tune_params.py](../scripts/tune_params.py) | Search cấu hình trên validation. |
 

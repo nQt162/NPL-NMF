@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from app.main import app
 
@@ -113,3 +114,47 @@ def test_summarize_evaluate_and_validation() -> None:
     }).status_code == 422
     assert client.post("/api/simulate", json={"text": TEXT, "iterations": 21}).status_code == 422
     assert client.post("/api/simulate", json={"text": "Một câu."}).status_code == 422
+
+
+@pytest.mark.parametrize("method", ["local_kl_mmr", "local_frobenius_mmr"])
+def test_summarize_accepts_query_prf_for_both_losses(method: str) -> None:
+    response = client.post("/api/summarize", json={
+        "text": TEXT,
+        "k": 2,
+        "summary_sentences": 2,
+        "method": method,
+        "query": "rau",
+        "query_weight": 0.8,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["method"] == method
+    assert data["loss_name"] == ("frobenius" if method == "local_frobenius_mmr" else "kullback-leibler")
+    assert data["query_feedback_applied"] is True
+    assert data["query_feedback_reason"] is None
+    assert data["query_weight"] == 0.8
+    assert data["selection_method"] == "query_prf_mmr"
+    assert data["pseudo_relevant_indices"]
+    assert len(data["selected_indices"]) == 2
+    assert data["selected_indices"] == sorted(set(data["selected_indices"]))
+    assert any(row["query_relevance"] > 0 for row in data["sentence_analysis"])
+
+
+@pytest.mark.parametrize("method", ["local_kl_mmr", "local_frobenius_mmr"])
+def test_summarize_reports_oov_query_without_rejecting_request(method: str) -> None:
+    response = client.post("/api/summarize", json={
+        "text": TEXT,
+        "k": 2,
+        "summary_sentences": 2,
+        "method": method,
+        "query": "qzxv987654321",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["query_feedback_applied"] is False
+    assert data["query_feedback_reason"]
+    assert data["selection_method"] == "maximum_marginal_relevance"
+    assert data["fallback_reason"] is None
+    assert len(data["selected_indices"]) == 2

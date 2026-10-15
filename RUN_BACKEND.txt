@@ -1,0 +1,2 @@
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "F:\Documents\CODE\NMF\NPL-NMF\scripts\start_backend.ps1"

@@ -182,7 +182,7 @@ Có thể dành một slide phụ/backup cho các nghiên cứu đã đọc:
 | Lee & Seung, MU/NMF | NMF và các quy tắc cập nhật nhân tử; nền tảng thuật toán. | Trang mô phỏng có MU tự cài; luồng tóm tắt dùng sklearn. Không gọi đây là tái hiện toàn bộ paper. |
 | Aghdam (2023), NMFTS | Thêm regularization quan hệ cặp câu vào NMF cho tóm tắt. | Hiện không phải một trong hai method web; paper-inspired branch cũ đã rút khỏi giao diện. |
 | Wang et al. (SIGIR 2008), symmetric NMF | Dùng semantic sentence similarity và symmetric factorization để gom câu/chọn đại diện. | Đồ thị SNMF đã rút khỏi web; không đồng nhất với NMF `V≈WH` hiện tại. |
-| Park & An, query-based PRF with NMF | Dùng truy vấn và pseudo-relevance feedback để ưu tiên nội dung cá nhân hóa. | Query PRF hiện là tùy chọn đơn giản trên nhánh KL; cần gọi là paper-inspired, không tuyên bố tái hiện đúng protocol. |
+| Park & An, query-based PRF with NMF | Dùng truy vấn và pseudo-relevance feedback để ưu tiên nội dung cá nhân hóa. | Query PRF hiện là tùy chọn đơn giản trên cả KL và Frobenius; cần gọi là paper-inspired, không tuyên bố tái hiện đúng protocol. |
 
 Chỉ nêu những chi tiết từ paper đã đọc/kiểm tra. Không nói rằng paper “chứng minh KL+L1+MMR của project tốt nhất” nếu paper không nghiên cứu đúng cấu hình đó.
 

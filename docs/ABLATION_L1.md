@@ -1,5 +1,7 @@
 # Thí nghiệm Ablation L1
 
+> Đồng bộ web ngày **15-10-2026**. Trang 04 nhập văn bản/reference trực tiếp, không upload JSONL. Mẫu AI mới và reference có sẵn ở trang 03 nhưng chưa tự chuyển sang trang 04.
+
 ## Mục tiêu
 
 Thí nghiệm cô lập tác động của L1 trong Local KL-NMF + MMR. Cả bốn nhánh dùng chung KL divergence, solver MU, TF-IDF tiếng Việt, quy tắc chọn câu MMR, ngân sách câu, corpus, seed và `l1_ratio=1.0`. Query PRF được tắt ở tất cả nhánh.
@@ -40,7 +42,7 @@ Chạy lệnh từ thư mục `backend` sau khi cài môi trường dự án:
   --input ..\data\splits\val.jsonl `
   --output ..\results\ablation\validation `
   --split validation `
-  --summary-sentences 3 `
+  --summary-sentences 4 `
   --mmr-lambda 0.7 `
   --alpha 0.001 `
   --seeds 42 43 44
@@ -55,6 +57,57 @@ Ba artifact được tạo trong thư mục output:
 - `ablation_report.json`: cấu hình, số lượt hợp lệ/lỗi/fallback, mean/std và chênh lệch ROUGE ghép cặp.
 
 Kết quả ở `results/ablation/` được giữ tách biệt và không ghi đè `results/metrics.csv` hoặc `results/predictions.jsonl`.
+
+## Thử cùng mẫu AI mới
+
+Dùng [toy.json](../data/demo/toy.json), mã `test_nmf_01`: 12 câu nguồn và reference trích xuất 4 câu S1/S5/S8/S10, index `[0,4,7,9]`. Trên trang 04 dán `text` vào Văn bản nguồn, `extractive_summary` vào Reference summary; đặt ID tương ứng, **k=3 nhập tay**, **4 câu**, alpha 0.001, lambda 0.7, seeds `42,43,44`.
+
+Trang 04 hiện để trống nguồn/reference, số câu mặc định vẫn 3 và seeds mặc định 42; không tự nhận mẫu và tham số từ trang khác. `toy.json` là JSON cho web, không phải JSONL của CLI; không đưa thẳng nó vào `--input`. CLI ví dụ phía trên cần JSONL hợp lệ, các split hiện rỗng nên chưa thể coi đó là lệnh benchmark chạy ngay.
+
+**Phạm vi F1:** bảng này chấm ROUGE F1 từ summary/reference qua tokenizer, không dùng vector `ground_truth_labels` để tính F1 phân loại câu. Nhãn/index không ép câu được chọn. Reference được cung cấp trước, không sửa sau khi nhìn output để làm L1 thắng.
+
+### Kết quả đã chạy lại ngày 15-10-2026
+
+Cấu hình cố định như trên; mean ± population SD qua ba seed, paired delta so `kl_no_l1` cùng bài/seed:
+
+| Cấu hình | ROUGE-1 | ROUGE-2 | ROUGE-L | Delta R1 | Delta R2 | Delta RL |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| KL không L1 | 0.612277 ± 0.004395 | 0.518893 ± 0.001072 | 0.567988 ± 0.005494 | 0 | 0 | 0 |
+| L1 trên W | 0.209424 ± 0 | 0.010582 ± 0 | 0.115183 ± 0 | -0.402853 | -0.508311 | -0.452804 |
+| L1 trên H | 0.606061 ± 0 | 0.520408 ± 0 | 0.575758 ± 0 | -0.006216 | +0.001516 | +0.007770 |
+| L1 trên W và H | 0.209424 ± 0 | 0.010582 ± 0 | 0.115183 ± 0 | -0.402853 | -0.508311 | -0.452804 |
+
+Mỗi cấu hình có 3 lượt thành công, không lỗi/fallback, paired_count=3. Cả bốn đều có W gần 0 trung bình 0.666667, H gần 0 trung bình 0.658359, active topic/câu 1 và feature/topic 109.666667, với ngưỡng tuyệt đối 1e-8.
+
+**Đọc đúng:** phạt H tăng nhẹ R2/L nhưng giảm R1; phạt W hoặc W+H giảm mạnh cả ba trong cấu hình này. Cùng tỷ lệ gần 0 không có nghĩa ma trận hoặc summary giống nhau. Không có bảo đảm L1 làm tăng ROUGE/độ thưa, và các weights vẫn có thể đổi dù thống kê threshold không đổi. Đọc thêm scale ambiguity và scoring, không suy nguyên nhân chỉ từ một cột.
+
+k=3 ở thí nghiệm này là chọn tay, không phải auto-k mặc định 1 của bài. Không so trực tiếp bảng này với trang 03 k=1 để quy khác biệt cho L1; so sánh ablation chỉ dùng các cặp trong cùng bảng. Không có tuning để chọn một kết quả thắng. Ba seed của một bài không phải ba bài độc lập hay khoảng tin cậy corpus.
+
+Lượt đo dùng core runner và thư mục tạm để không ghi số vào `results/metrics.csv`. Khi chạy lại qua web sẽ có run_id/artifact mới; không giả định đã có sẵn report của lượt đo tài liệu trong thư mục kết quả.
+
+### Chạy lại mà không cần tạo JSONL
+
+Chạy Python sau từ thư mục `backend` với venv dự án, hoặc làm cùng thao tác trong trang 04:
+
+```python
+import json
+from pathlib import Path
+from app.core.ablation import run_l1_ablation
+
+demo = json.loads(Path("../data/demo/toy.json").read_text(encoding="utf-8"))
+report = run_l1_ablation(
+    [{"id": demo["doc_id"], "article": demo["text"],
+      "reference_summary": demo["extractive_summary"]}],
+    Path("../results/ablation/pilot_ai_3seeds"),
+    split="pilot", dataset_name=demo["doc_id"],
+    k=3, summary_sentences=4, mmr_lambda=0.7,
+    alpha=0.001, seeds=[42, 43, 44],
+)
+print(report["methods"])
+print(report["paired_deltas_vs_kl_no_l1"])
+```
+
+Các số gắn với scikit-learn 1.7.2, Underthesea 9.5.0, NumPy 2.2.6 và rouge-score 0.1.2 cùng text/stopwords/config hiện tại; thay chúng có thể đổi kết quả.
 
 ## Trên web và dữ liệu hiện có
 

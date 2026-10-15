@@ -6,6 +6,8 @@ Tài liệu này ghi lại luồng cũ, các thay đổi thuật toán và nơi 
 
 ## Tóm tắt trước và sau
 
+**Đồng bộ web ngày 15-10-2026:** mẫu mặc định `test_nmf_01` có 12 câu AI và reference 4 câu S1/S5/S8/S10. Trang 01/02/03 dùng chung nguồn; trang 03 điền sẵn reference và Nạp ví dụ khôi phục cả hai đoạn. Trang 02/03 mặc định 4 câu; trang 04 vẫn nhập tay và mặc định 3. Xem số đo/cấu hình trong [cẩm nang, phần 17](NMF_SYSTEM_GUIDE.md#chuong-17) và [kịch bản demo](DEMO_PRESENTATION_SCRIPT.md).
+
 | Hạng mục | Trước | Hiện tại | Tác động |
 | --- | --- | --- | --- |
 | Tóm tắt chính | Dựa vào vocabulary/topic của Global NMF train trên corpus cũ | Fit TF-IDF và NMF cục bộ trên câu trong văn bản đầu vào | Topic, từ khóa và câu trích gắn với văn bản hiện tại |
@@ -13,7 +15,9 @@ Tài liệu này ghi lại luồng cũ, các thay đổi thuật toán và nơi 
 | Chọn k | Heuristic hoặc k cố định | Masked KL imputation khi không truyền k | Chọn k dựa trên khả năng khôi phục các phần tử TF-IDF bị che |
 | Chọn câu | Xếp hạng theo trọng số/topic đơn giản | MMR: cân bằng relevance và cosine redundancy | Hạn chế lặp ý, sau cùng khôi phục thứ tự câu gốc |
 | Phương pháp so sánh | Chỉ tập trung Local KL-NMF | Thêm Local Frobenius-NMF với cùng L1 | So sánh KL và Frobenius trong khi giữ chung penalty, MMR và chính sách chọn k |
-| Đánh giá | Chưa có dữ liệu benchmark dùng được | Có batch runner, validation tuning và API đọc kết quả | Chưa báo điểm cho đến khi có reference summary hợp pháp |
+| Đánh giá | Chưa có benchmark corpus dùng được | Trang 03 sinh hai output và chấm ROUGE với reference mẫu điền sẵn; batch/tuning chạy riêng | Demo được đánh giá một bài, nhưng chưa đủ kết luận ưu thế tổng quát |
+| Văn bản mẫu | Bài xe buýt 6 câu, reference nhập tay | Bài AI 12 câu và reference trích xuất 4 câu do người dùng cung cấp | Thử nhiều nhóm nội dung và chạy ngay trang 03, không đồng nghĩa NMF tách đúng các nhóm ngữ nghĩa |
+| Query | Chỉ hỗ trợ KL, bị ẩn khi chọn Frobenius | PRF tùy chọn cho KL và Frobenius; giữ query/weight khi đổi method | Dùng cùng query cho hai loss mà không đổi công thức NMF |
 
 ## Luồng Local KL-NMF
 
@@ -32,9 +36,9 @@ Cấu hình mặc định hiện là `alpha_w=0.001`, `alpha_h=0.001`, `l1_ratio
 
 `backend/app/core/nmf.py::fit_nmf` được gọi bởi `/api/simulate` để trả snapshot MU tự cài đặt. `backend/app/core/summarize.py::_fit_local_nmf` dùng `sklearn.decomposition.NMF` cho bản tóm tắt thật. Hai implementation có thể khác nhau về khởi tạo, cập nhật số và đường hội tụ; giao diện mô phỏng ghi rõ đây là minh họa, không tuyên bố snapshot là trạng thái bên trong của scikit-learn.
 
-## Ghi chú các nhánh nghiên cứu đã rút khỏi web
+## Các nhánh nghiên cứu và phạm vi đang dùng
 
-Các nhánh dưới đây không còn được API tóm tắt chấp nhận và không xuất hiện trong giao diện. Hai phương pháp đang hoạt động là KL+L1 và Frobenius; cả hai dùng MMR để trích xuất câu.
+Hai nhánh NMFTS/SNMF dưới đây đã rút khỏi API/web. Hai phương pháp đang hoạt động là KL+L1 và Frobenius, đều có MMR; PRF ở mục sau vẫn hoạt động như bước tùy chọn cho cả hai.
 
 ### NMFTS-inspired pairwise
 
@@ -50,9 +54,11 @@ Nhánh này phân rã đồ thị tương tự câu theo dạng `A ≈ G Gᵀ`, 
 
 ### Query PRF
 
-Trên nhánh Local KL-NMF, hệ thống biến query thành vector theo vocabulary của chính văn bản, lấy tối đa ba câu pseudo-relevant, trộn centroid các câu đó với query rồi kết hợp query relevance và topic relevance trước MMR. Nếu query không có từ khớp vocabulary, API trả lý do và tiếp tục bằng Local KL-NMF + MMR thông thường.
+Trên cả hai nhánh Local KL-NMF và Local Frobenius-NMF, hệ thống biến query thành vector theo vocabulary của chính văn bản, lấy tối đa ba câu pseudo-relevant, trộn centroid các câu đó với query rồi kết hợp query relevance và topic relevance trước MMR. Nếu query không có từ khớp vocabulary, API trả lý do và tiếp tục bằng NMF + MMR của phương pháp đang chọn.
 
-Query PRF được đưa vào batch chỉ khi **mọi bài** trong split có trường `query`. Nhánh này lấy ý tưởng từ Park và An; dữ liệu/query protocol paper chưa được tái lập trong project.
+**Cập nhật 15-10-2026:** trước đây backend từ chối query khi chọn Frobenius, còn frontend ẩn ô truy vấn và không gửi query cho nhánh này; hiện hai phương pháp dùng chung `_query_feedback`, ô truy vấn và trọng số luôn dùng được ở trang **02 / Tóm tắt văn bản**, đồng thời được giữ khi đổi phương pháp. PRF chỉ tác động relevance và MMR sau khi fit, không thay V, k, W/H hay objective NMF. Các kiểm thử trong `backend/tests/test_summary.py` và `backend/tests/test_api.py` kiểm tra hai loss, trọng số 0/1 và phép trộn relevance, query rỗng/stopword/OOV, ngân sách câu và objective không đổi. Đây là mở rộng chức năng, chưa phải bằng chứng tăng ROUGE. Trang đánh giá và ablation vẫn tắt query để giữ nguyên protocol hiện có.
+
+PRF lấy ý tưởng từ Park và An; dữ liệu/query protocol paper chưa được tái lập. `scripts/run_experiment.py` hiện không truyền query vào các lượt benchmark, kể cả khi JSONL có trường đó; thêm trường query không có nghĩa đã chạy đánh giá query-focused.
 
 Chi tiết mapping với nghiên cứu và các giới hạn học thuật nằm tại [PAPER_METHODS_AND_EXPERIMENTS.md](PAPER_METHODS_AND_EXPERIMENTS.md).
 
@@ -73,7 +79,7 @@ Chi tiết mapping với nghiên cứu và các giới hạn học thuật nằm
 
 `scripts/tune_params.py` tìm k, số câu, alpha W/H, L1 ratio và MMR lambda cho cả hai phương pháp trên validation; dùng cùng không gian tham số để giữ so sánh công bằng. Cấu hình chỉ được xếp hạng nếu chạy thành công trên toàn bộ bài validation. Không dùng test để tuning.
 
-Mỗi dòng JSONL cần có `id`, `article`, `reference_summary`; thêm `query` nếu đánh giá Query PRF. Tập dữ liệu cần chia theo **bài**, không chia câu của cùng bài sang nhiều split, và cần manifest ghi nguồn/quyền sử dụng.
+Mỗi dòng JSONL cần có `id`, `article`, `reference_summary`. Nếu muốn đánh giá PRF theo batch, phải bổ sung truyền query và protocol riêng; runner hiện tại chưa sử dụng query. Chia dữ liệu theo bài và ghi manifest nguồn/quyền sử dụng. `toy.json` là JSON mẫu web, không phải JSONL theo schema CLI.
 
 Hiện `data/splits/train.jsonl`, `val.jsonl`, `test.jsonl` đang rỗng và `results/metrics.csv` chưa có kết quả. Vì vậy chưa có cơ sở kết luận phương pháp nào tốt hơn; không tạo điểm giả từ demo.
 
@@ -82,7 +88,8 @@ Hiện `data/splits/train.jsonl`, `val.jsonl`, `test.jsonl` đang rỗng và `re
 | Phần mới | Tác dụng dự kiến trong thuật toán | Vị trí người dùng nhìn thấy trên web |
 | --- | --- | --- |
 | So sánh Local KL+L1 và Local Frobenius+L1 | Quan sát hai objective dưới cùng alpha/L1, k, seed và MMR; không mặc định objective nào luôn tốt hơn | Tab **01 / Mô phỏng NMF** → menu phương pháp; Tab **02 / Tóm tắt văn bản** → menu **Phương pháp**; Tab **03 / Đánh giá** → ROUGE hai đầu ra. |
-| Query PRF | Dùng query người dùng để ưu tiên câu phù hợp với ý định tìm kiếm; nếu query OOV/không khớp, hệ thống báo lý do và vẫn trả tóm tắt Local KL+MMR | Tab **02 / Tóm tắt văn bản** → khi chọn Local KL, nhập vào **Truy vấn (không bắt buộc)**; trọng số xuất hiện khi đã nhập query. Trong kết quả, thông tin pseudo-relevant được ghi dưới summary, và điểm Query xuất hiện trong từng câu nếu PRF được áp dụng. |
+| Mẫu AI và reference | Giảm thao tác chuẩn bị demo, giữ dữ liệu/nhãn đồng bộ, không giám sát fit NMF | Tab **01/02/03** có bài nguồn; **03** có reference S1/S5/S8/S10 và Nạp ví dụ; **02/03** mặc định 4 câu. Tab **04** cần dán dữ liệu và tự đổi ngân sách nếu dùng cùng mẫu. |
+| Query PRF | Dùng query người dùng để ưu tiên câu phù hợp với ý định tìm kiếm ở cả KL và Frobenius; nếu query OOV/không khớp, hệ thống báo lý do và vẫn trả tóm tắt theo phương pháp đang chọn | Tab **02 / Tóm tắt văn bản** → chọn Local KL hoặc Local Frobenius rồi nhập **Truy vấn (không bắt buộc)**; trọng số xuất hiện khi đã nhập query. Trong kết quả, thông tin pseudo-relevant được ghi dưới summary, và điểm Query xuất hiện trong từng câu nếu PRF được áp dụng. |
 | Điều chỉnh alpha W/H và L1 ratio | Có thể khảo sát độ thưa thay vì mặc định cố định; alpha W tác động độ thưa của phân phối câu-topic, alpha H tác động độ thưa từ-topic | Tab **02 / Tóm tắt văn bản** → mở **Tham số thuật toán**; dùng chung cho hai loss. Giá trị mặc định 0.001 / 0.001 / 1.0 chưa được tune trên corpus. |
 | Loss theo objective | Phân biệt KL+L1 và Frobenius; mô phỏng hiện phần loss theo từng vòng, tóm tắt hiện objective cuối | Tab **01 / Mô phỏng NMF** → đồ thị loss và breakdown; Tab **02 / Tóm tắt văn bản** → panel **Objective**. Không so sánh trực tiếp trị số giữa hai objective. |
 | Auto-k và candidate scores | Cho xem điểm positive-entry masked KL validation; trường hợp heuristic không có score | Tab **01 / Mô phỏng NMF**, Tab **02 / Tóm tắt văn bản** và Tab **03 / Đánh giá**. Mặc định quét k=1..10 trong giới hạn kích thước; score không phải ROUGE. |
@@ -92,19 +99,20 @@ Hiện `data/splits/train.jsonl`, `val.jsonl`, `test.jsonl` đang rỗng và `re
 
 Tab **04 / Ablation L1** dùng để kiểm tra riêng tác động của penalty L1 lên W, H và W+H. Form web nhập bài viết và reference trực tiếp; CLI vẫn nhận JSONL. Global NMF cũ và Lead-N chỉ còn là baseline trong benchmark batch ngoại tuyến `scripts/run_experiment.py`. Trang **03 / Đánh giá** so ROUGE của KL+L1+MMR và Frobenius+L1+MMR trên cùng văn bản.
 
-**Hiệu quả đã đo và hiệu quả kỳ vọng:** các tác dụng trong bảng là mục tiêu thuật toán, chưa phải kết luận thực nghiệm. `data/splits/*.jsonl` và `results/metrics.csv` hiện rỗng, nên chưa có ROUGE/runtime để khẳng định nhánh nào tốt hơn. Cần bổ sung reference summary hợp pháp, tune trên validation và chỉ dùng test cho đánh giá cuối.
+**Hiệu quả đã đo và hiệu quả kỳ vọng:** các tác dụng trong bảng là mục tiêu thuật toán, chưa phải kết luận tổng quát. Mẫu AI đã có số đo pilot; `data/splits/*.jsonl` và `results/metrics.csv` vẫn rỗng nên chưa có benchmark corpus để khẳng định nhánh nào tốt hơn. Cần bổ sung dữ liệu/reference có quyền sử dụng, tune trên validation và chỉ dùng test cho đánh giá cuối.
 
 ## File chính
 
 - `backend/app/core/nmf.py`: custom MU cho mô phỏng, objective KL/Frobenius + regularization và positive-entry masked-KL k selection.
 - `backend/app/core/vectorize.py`: TF-IDF cục bộ theo câu.
-- `backend/app/core/summarize.py`: sklearn Local KL/Frobenius-NMF + cùng L1, MMR, topic term distinctiveness, representative sentences và Query PRF tùy chọn trên nhánh KL.
+- `backend/app/core/summarize.py`: sklearn Local KL/Frobenius-NMF + cùng L1, MMR, topic term distinctiveness, representative sentences và Query PRF tùy chọn trên cả hai nhánh.
 - `backend/app/core/paper_methods.py`: mã nghiên cứu NMFTS/SNMF cũ, không còn được gọi từ luồng web.
 - `backend/app/schemas.py`, `backend/app/main.py`: API contracts, evaluate và batch metrics.
 - `scripts/run_experiment.py`: benchmark các baseline/phương pháp.
 - `scripts/tune_params.py`: tuning trên validation.
 - `frontend/src/pages/Summarizer.jsx`: chọn method, query và tham số; loss theo objective.
-- `frontend/src/pages/Evaluation.jsx`: ROUGE một mẫu và batch.
+- `frontend/src/pages/Evaluation.jsx`: nguồn/reference mẫu, Nạp ví dụ và ROUGE hai output trên một bài, không hiển thị batch.
+- `data/demo/toy.json`, `frontend/src/demo.test.js`: mẫu AI 12 câu, reference/nhãn và kiểm tra tính đồng bộ.
 - `frontend/src/api.js`: gọi endpoint metrics backend.
 - `docs/PAPER_METHODS_AND_EXPERIMENTS.md`: mapping paper, protocol chạy và hướng tiếp theo.
 

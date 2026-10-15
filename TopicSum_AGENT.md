@@ -86,7 +86,7 @@ Relevance lấy từ phân phối topic của câu và độ phổ biến topic;
 ## 4. API
 - `GET /health` → `{ "status": "ok" }`.
 - `POST /api/simulate` body `{ "text": "...", "k": 2, "iterations": 10, "seed": 42 }`; response gồm `sentences`, `terms`, `V`, `snapshots:[{iteration,W,H,WH,loss}]`, metadata về loss/L1 và `implementation="educational_custom_mu"`. Dùng `fit_nmf(trace=True)`.
-- `POST /api/summarize` nhận `text`, `k`, `summary_sentences`, `mmr_lambda`, `seed`, `method`, `alpha_w`, `alpha_h`, `l1_ratio`, cùng query tùy chọn trên nhánh KL. Hai method là `local_kl_mmr` và `local_frobenius_mmr`; cùng L1/MMR/k, chỉ khác `beta_loss`. Response có objective breakdown, candidate k, từ khóa/câu đại diện topic, phân tích câu theo `score_round` và `selection_trace`.
+- `POST /api/summarize` nhận `text`, `k`, `summary_sentences`, `mmr_lambda`, `seed`, `method`, `alpha_w`, `alpha_h`, `l1_ratio`, cùng query tùy chọn trên cả KL và Frobenius. Hai method là `local_kl_mmr` và `local_frobenius_mmr`; cùng L1/MMR/k, chỉ khác `beta_loss`. Response có objective breakdown, candidate k, từ khóa/câu đại diện topic, phân tích câu theo `score_round` và `selection_trace`.
 - `POST /api/evaluate` chỉ dùng cho một mẫu demo `{ "text":"...", "reference_summary":"...", "summary_sentences":3 }`; trả ROUGE-1/2/L F1 và summary. Batch đánh giá chạy từ CLI, không qua API.
 - Validation Pydantic: giới hạn kích thước văn bản ~20.000 ký tự, k 1..10, số câu 1..5, iterations 1..20 cho simulate; 422 cho input thiếu/hỏng. Frontend hiển thị lỗi.
 

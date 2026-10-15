@@ -21,8 +21,8 @@ function penaltyLabel(ratio) {
 
 export default function Evaluation() {
   const [text, setText] = useState(toy.text);
-  const [reference, setReference] = useState('');
-  const [sentenceCount, setSentenceCount] = useState(3);
+  const [reference, setReference] = useState(toy.extractive_summary);
+  const [sentenceCount, setSentenceCount] = useState(toy.ground_truth_indices.length);
   const [k, setK] = useState('');
   const [mmrLambda, setMmrLambda] = useState(0.7);
   const [alphaW, setAlphaW] = useState(0.001);
@@ -35,6 +35,14 @@ export default function Evaluation() {
 
   function updateField(setter, value) {
     setter(value);
+    setResult(null);
+    setError('');
+  }
+
+  function loadExample() {
+    setText(toy.text);
+    setReference(toy.extractive_summary);
+    setSentenceCount(toy.ground_truth_indices.length);
     setResult(null);
     setError('');
   }
@@ -96,6 +104,7 @@ export default function Evaluation() {
             placeholder="Nhập văn bản cần tóm tắt..."
             required
           />
+          <div className="field-hint"><span>{text.length.toLocaleString('vi-VN')} ký tự</span><button type="button" className="text-button" onClick={loadExample}>Nạp ví dụ</button></div>
           <label className="field-label field-label-spaced" htmlFor="evaluate-reference">
             Bản tóm tắt tham chiếu
           </label>

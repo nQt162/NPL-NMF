@@ -1,4 +1,4 @@
-"""Extract sentences with local, on-the-fly KL-NMF and standard MMR."""
+"""Extract sentences with local KL/Frobenius-NMF, optional PRF and standard MMR."""
 
 from __future__ import annotations
 
@@ -384,8 +384,6 @@ def summarize(
         raise ValueError("l1_ratio must be finite and between 0 and 1")
     if not np.isfinite(factor_zero_threshold) or factor_zero_threshold < 0:
         raise ValueError("factor_zero_threshold must be finite and nonnegative")
-    if query and method != METHOD_LOCAL_KL:
-        raise ValueError("Query PRF hiện chỉ hỗ trợ với phương pháp Local KL-NMF + MMR")
 
     sentences = split_sentences(text)
     if not sentences:
@@ -428,9 +426,6 @@ def summarize(
             l1_ratio=l1_ratio,
         )
 
-    query_scores: np.ndarray | None = None
-    pseudo_relevant: list[int] = []
-    query_feedback_reason: str | None = None
     loss_name = SPARSE_KL_LOSS_NAME if method == METHOD_LOCAL_KL else "frobenius"
     W, H = _fit_local_nmf(
         V, k_used, seed, loss_name, alpha_w, alpha_h, l1_ratio
@@ -448,10 +443,9 @@ def summarize(
             alpha_h=alpha_h,
             l1_ratio=l1_ratio,
         )
-    if method == METHOD_LOCAL_KL:
-        query_scores, pseudo_relevant, query_feedback_reason = _query_feedback(
-            query, vectorizer, V, budget
-        )
+    query_scores, pseudo_relevant, query_feedback_reason = _query_feedback(
+        query, vectorizer, V, budget
+    )
     local_loss = objective_breakdown(
         V,
         W,

@@ -26,10 +26,10 @@ Backend đã có xử lý tiếng Việt, NMF tự cài đặt, API, script chu�
 cd backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ..\scripts\start_backend.ps1
 ```
 
-API tại `http://127.0.0.1:8000`, tài liệu tương tác tại `/docs`. Mở một terminal khác trong `backend` để chạy kiểm thử:
+API tại `http://127.0.0.1:8001`, tài liệu tương tác tại `/docs`. Lần sau chỉ cần chạy lệnh trong [RUN_BACKEND.txt](RUN_BACKEND.txt) từ bất kỳ thư mục nào, không cần activate lại môi trường. Script dừng backend cũ của đúng dự án trên cổng này rồi khởi động một bản mới, không bật reload; không dừng ứng dụng khác chiếm cổng. Giữ terminal mở khi dùng web. Khởi động lại sẽ hủy các job ablation đang chạy. Mở một terminal khác trong `backend` để chạy kiểm thử:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
@@ -43,7 +43,7 @@ Các endpoint: `GET /health`, `POST /api/simulate`, `POST /api/summarize`, `POST
 
 ## Cài đặt và chạy frontend (PowerShell)
 
-Cần Node.js 20.19+ hoặc 22.12+. Chạy backend ở cổng 8000 trước, sau đó mở terminal khác:
+Cần Node.js 20.19+ hoặc 22.12+. Chạy backend ở cổng 8001 trước, sau đó mở terminal khác:
 
 ```powershell
 cd frontend
@@ -51,10 +51,10 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Mở `http://localhost:5173`. Vite chuyển `/api` và `/health` đến `http://127.0.0.1:8000`. Nếu frontend được phục vụ riêng, đặt `VITE_API_URL` thành địa chỉ backend trước khi build và cấu hình CORS backend cho origin tương ứng. Kiểm tra frontend bằng `npm.cmd test` và `npm.cmd run build`.
+Mở `http://localhost:5173`. Vite chuyển `/api` và `/health` đến `http://127.0.0.1:8001`. Nếu frontend được phục vụ riêng, đặt `VITE_API_URL` thành địa chỉ backend trước khi build và cấu hình CORS backend cho origin tương ứng. Kiểm tra frontend bằng `npm.cmd test` và `npm.cmd run build`.
 
 - **Mô phỏng NMF:** nạp văn bản tự viết từ `data/demo/toy.json`, gọi `/api/simulate` và hiển thị V, W, H, WH, loss ở từng vòng. Đây là MU tự cài đặt để minh họa, không phải trace nội bộ của scikit-learn dùng ở trang tóm tắt.
-- **Tóm tắt:** gọi `/api/summarize`, hiển thị câu gốc, chủ đề, điểm thành phần và lý do fallback.
+- **Tóm tắt:** gọi `/api/summarize`, hiển thị câu gốc, chủ đề, điểm thành phần và lý do fallback; query/PRF tùy chọn dùng được cho cả KL và Frobenius, chỉ tác động relevance/MMR sau phân rã, không thay objective NMF.
 - **Đánh giá:** nhập văn bản nguồn và bản tham chiếu; trang tạo hai bản tóm tắt với KL+L1+MMR và Frobenius+L1+MMR, dùng chung k, alpha/L1, seed, ngân sách câu và MMR rồi so sánh ROUGE-1/2/L qua `/api/evaluate`.
 
 Hai nhánh sản xuất đều dùng `sklearn.decomposition.NMF` với `solver="mu"`, `init="nndsvdar"`, và cùng penalty mặc định `alpha_W=alpha_H=0.001`, `l1_ratio=1.0`; chỉ khác `beta_loss`. Mức 0.001 là mặc định bảo thủ để tránh penalty làm factor sụp về 0 trên TF-IDF cục bộ; đây chưa phải giá trị tối ưu thực nghiệm vì split dữ liệu hiện rỗng. Khi không nhập k, hệ thống thử các k khả thi từ 1 đến 10 bằng 10 lượt giữ lại ngẫu nhiên các phần tử TF-IDF dương, chấm KL trên phần tử bị giữ lại. Nếu dữ liệu dương quá ít, API trả nhãn heuristic và không bịa điểm số. Điểm k là reconstruction validation, không phải ROUGE/chất lượng tóm tắt.
